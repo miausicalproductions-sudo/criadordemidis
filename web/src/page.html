@@ -143,11 +143,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}
           <div class="sl"><label for="rhD">Ataques da mão direita</label><input type="range" id="rhD" min="0.10" max="0.60" step="0.02" value="0.22"><output id="rhDo"></output></div>
           <div class="sl"><label for="intensity">Intensidade (dinâmica geral)</label><input type="range" id="intensity" min="0.4" max="1.6" step="0.05" value="1"><output id="intensityO"></output></div>
           <div class="sl"><label for="human">Humanização (0 = grade exata)</label><input type="range" id="human" min="0" max="2" step="0.05" value="1"><output id="humanO"></output></div>
-          <div class="sl"><label for="strum">Rolagem do acorde (ms)</label><input type="range" id="strum" min="0" max="120" step="1" value="45"><output id="strumO"></output></div>
-          <div class="sl"><label for="strumP">Acordes que rolam (%)</label><input type="range" id="strumP" min="0" max="100" step="5" value="55"><output id="strumPO"></output></div>
+          <div class="sl"><label for="strum">Rolagem do acorde (ms)</label><input type="range" id="strum" min="0" max="120" step="1" value="36"><output id="strumO"></output></div>
+          <div class="sl"><label for="strumP">Acordes que rolam (%)</label><input type="range" id="strumP" min="0" max="100" step="5" value="80"><output id="strumPO"></output></div>
           <div><label for="strumDir">Direção da rolagem</label>
             <select id="strumDir"><option value="up">Do grave ao agudo</option><option value="down">Do agudo ao grave</option><option value="mix" selected>Variada (mais do agudo ao grave)</option></select></div>
-          <div class="sl"><label for="lead">Melodia à frente do acompanhamento (ms)</label><input type="range" id="lead" min="0" max="40" step="1" value="14"><output id="leadO"></output></div>
+          <div class="sl"><label for="lead">Melodia à frente do acompanhamento (ms)</label><input type="range" id="lead" min="0" max="40" step="1" value="12"><output id="leadO"></output></div>
           <div class="sl"><label for="rubato">Respiração do andamento (ms)</label><input type="range" id="rubato" min="0" max="30" step="1" value="10"><output id="rubatoO"></output></div>
           <div class="sl"><label for="contrast">Destaque da melodia sobre o acompanhamento</label><input type="range" id="contrast" min="0" max="2" step="0.05" value="1"><output id="contrastO"></output></div>
           <div class="sl"><label for="tsd">Soltura do timing (ms)</label><input type="range" id="tsd" min="0" max="15" step="0.5" value="6"><output id="tsdO"></output></div>
@@ -226,7 +226,7 @@ function params(){
   return {prog: $('prog').value, key: keySel.value, bpm: Math.min(220, Math.max(40, num('bpm', 106.4))), repeats: parseInt($('repeats').value, 10),
     seed: Math.max(1, Math.floor(num('seed', 1))), texture: $('texture').value, intensity: num('intensity', 1), rhythm: $('rhythm').value, solo: $('solo').checked,
     soloStartBar: Math.max(0, Math.floor(num('soloStart', 3)) - 1), lhDensity: num('lhD', .28), rhDensity: num('rhD', .22),
-    human: num('human', 1), timingSd: num('tsd', 6), strumMs: num('strum', 45), strumProb: num('strumP', 55) / 100, strumDir: $('strumDir').value, lead: num('lead', 14), rubato: num('rubato', 10), contrast: num('contrast', 1), pedal: $('pedal').checked};
+    human: num('human', 1), timingSd: num('tsd', 6), strumMs: num('strum', 36), strumProb: num('strumP', 80) / 100, strumDir: $('strumDir').value, lead: num('lead', 12), rubato: num('rubato', 10), contrast: num('contrast', 1), pedal: $('pedal').checked};
 }
 function syncOutputs(){
   $('lhDo').textContent = num('lhD', 0).toFixed(2); $('rhDo').textContent = num('rhD', 0).toFixed(2);
@@ -243,7 +243,7 @@ function regenerate(){
   try {
     const prof = PGM.aggregateProfile(S.refs);
     const g = PGM.generate({...p, profile: p.rhythm === 'learned' ? prof : null});
-    const mk = amt => PGM.humanize(g.notes, g.segs, p.bpm, g.total, p.seed, {amount: amt, timingSd: p.timingSd, timingMax: 22, velJitter: 4, vShift: (p.intensity - 1) * 20 + (p.texture === 'driving' ? 0 : -8), strumMs: p.strumMs, strumProb: p.strumProb, strumDir: p.strumDir, lead: p.lead, rubato: p.rubato, contrast: p.contrast, pedal: p.pedal});
+    const mk = amt => PGM.humanize(g.notes, g.segs, p.bpm, g.total, p.seed, {amount: amt, timingSd: p.timingSd, timingMax: 22, velJitter: 6, vShift: (p.intensity - 1) * 20 + (p.texture === 'driving' ? 0 : -8), strumMs: p.strumMs, strumProb: p.strumProb, strumDir: p.strumDir, lead: p.lead, rubato: p.rubato, contrast: p.contrast, pedal: p.pedal});
     S.result = {g, p, human: mk(p.human), grid: mk(0), prof};
     $('progErr').hidden = true;
     renderChips(p);
@@ -394,9 +394,9 @@ function loadRecipe(o){
   $('prog').value = o.prog; keySel.value = o.key; $('bpm').value = o.bpm; $('repeats').value = String(o.repeats); $('seed').value = o.seed;
   $('rhythm').value = o.rhythm; $('solo').checked = !!o.solo; $('soloStart').value = (o.soloStartBar || 0) + 1;
   $('lhD').value = o.lhDensity; $('rhD').value = o.rhDensity; $('human').value = o.human; $('tsd').value = o.timingSd; $('pedal').checked = !!o.pedal;
-  $('strum').value = o.strumMs ?? 45; $('strumP').value = Math.round((o.strumProb ?? 0.55) * 100); $('strumDir').value = o.strumDir || 'mix';
+  $('strum').value = o.strumMs ?? 36; $('strumP').value = Math.round((o.strumProb ?? 0.8) * 100); $('strumDir').value = o.strumDir || 'mix';
   $('texture').value = o.texture || 'driving'; $('intensity').value = o.intensity ?? 1;
-  $('lead').value = o.lead ?? 14; $('rubato').value = o.rubato ?? 10; $('contrast').value = o.contrast ?? 1;
+  $('lead').value = o.lead ?? 12; $('rubato').value = o.rubato ?? 10; $('contrast').value = o.contrast ?? 1;
   if (o.profile && o.profile.low && !S.refs.length){
     S.refs.push({name: 'perfil da receita', fromRecipe: true, nNotes: null, bars: o.profile.bars, bpm: o.bpm, key: o.key, chords: [],
       low: o.profile.low.map(x => x * o.profile.bars), high: o.profile.high.map(x => x * o.profile.bars)}); saveRefs();

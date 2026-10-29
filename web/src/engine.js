@@ -348,7 +348,7 @@ function generate(o){
    - pedal com meio-pedal (profundidade variável) */
 const msToTicks = (ms, bpm) => ms * bpm * PPQ / 60000;
 const accent = s => s === 0 ? 9 : s === 8 ? 5 : s % 4 === 0 ? 2 : s % 2 === 0 ? -1 : -4;
-const HUMAN_DEFAULTS = {vShift: 0, strumMs: 45, strumProb: 0.55, strumDir: 'mix', lead: 14, rubato: 10, contrast: 1, timingSd: 6, timingMax: 22, velJitter: 4, pedal: true};
+const HUMAN_DEFAULTS = {vShift: 0, strumMs: 36, strumProb: 0.8, strumDir: 'mix', lead: 12, rubato: 10, contrast: 1, timingSd: 6, timingMax: 22, velJitter: 6, pedal: true};
 function humanize(notes, segs, bpm, total, seed, cfg){
   const c = {...HUMAN_DEFAULTS}; for (const k in cfg) if (cfg[k] !== undefined) c[k] = cfg[k];
   const A = c.amount, rng = makeRng(seed * 7919 + 13), events = [], groups = new Map();
@@ -366,9 +366,9 @@ function humanize(notes, segs, bpm, total, seed, cfg){
     const nn = ns.length;
     // rolagem: só parte dos acordes rola forte; os outros ficam quase juntos
     const rolled = rng() < c.strumProb;
-    const dirDown = c.strumDir === 'down' || (c.strumDir === 'mix' && rng() < 0.55);
+    const dirDown = c.strumDir === 'down' || (c.strumDir === 'mix' && rng() < 0.65);
     const order = ns.map((_, i) => i); if (dirDown) order.reverse();
-    const span = nn < 2 ? 0 : c.strumMs * A * (rolled ? rng.uniform(0.6, 1.3) : rng.uniform(0, 0.25)) * Math.min(1, (nn - 1) / 3);
+    const span = nn < 2 ? 0 : c.strumMs * A * (rolled ? rng.uniform(0.5, 1.6) : rng.uniform(0, 0.3)) * Math.min(1, (nn - 1) / 3);
     const gaps = order.slice(1).map(() => rng.uniform(0.5, 1.5)), gs = gaps.reduce((a, b) => a + b, 0) || 1;
     const delay = new Array(nn).fill(0), rank = new Array(nn).fill(0); let acc = 0;
     order.forEach((idx, k) => { if (k > 0) acc += span * gaps[k - 1] / gs; delay[idx] = acc; rank[idx] = nn > 1 ? 1 - 2 * k / (nn - 1) : 0; });
@@ -382,7 +382,7 @@ function humanize(notes, segs, bpm, total, seed, cfg){
       const st = Math.floor(n.start), sb = st % 16;
       let add = accent(sb) + 6 * Math.sin(2 * Math.PI * n.start / 64) + (segStarts.has(st) ? 5 : 0) + 3 * rank[i] * (span > 8 ? 1 : 0);
       if (trk === 'solo'){ const fr = (n.start % 32) / 32; add += 6 * (2 * Math.sin(Math.PI * (0.15 + 0.7 * fr)) - 1) + (n.pitch - 76) * 0.25 + Math.min(8, n.dur) * 0.3; }
-      if (n.role === 'top') add += 7 * c.contrast; else if (n.role === 'inner' && trk === 'rh') add -= 5 * c.contrast; else if (n.role === 'bass') add += 4;
+      if (n.role === 'top') add += 7 * c.contrast; else if (n.role === 'inner' && trk === 'rh') add -= 5 * c.contrast; else if (n.role === 'bass') add -= 2;
       let v = base[trk] + A * add + rng.gauss(0, c.velJitter * 0.8) * A;
       if (A === 0) v = flat[trk];
       v = Math.round(clamp(v, 18, 122));
@@ -401,9 +401,9 @@ function humanize(notes, segs, bpm, total, seed, cfg){
   const pedal = [];
   if (c.pedal){
     const marks = new Set(segs.map(s => s.start)); for (let b = 0; b < Math.floor(total / 16); b++) marks.add(b * 16);
-    const depth = () => Math.round(127 - A * rng.uniform(0, 38));
+    const depth = () => { const r = rng(), d = r < 0.27 ? rng.uniform(35, 63) : r < 0.74 ? rng.uniform(64, 95) : rng.uniform(96, 127); return Math.round(127 - A * (127 - d)); };
     for (const m of [...marks].sort((a, b) => a - b)){
-      const t0 = m * TPS, up = t0 + msToTicks(rng.uniform(12, 30) * A + 8, bpm), dn = up + msToTicks(rng.uniform(35, 70) * A + 20, bpm);
+      const t0 = m * TPS, up = t0 + msToTicks(clamp(rng.gauss(60, 35), 15, 130) * A + 8, bpm), dn = up + msToTicks(rng.uniform(100, 260) * A + 30, bpm);
       pedal.push([Math.round(up), Math.round(rng.uniform(0, 26) * A)], [Math.round(dn), depth()]);
     }
     pedal.unshift([0, 127]); pedal.push([total * TPS + 10, 0]);
