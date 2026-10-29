@@ -1,0 +1,13 @@
+{
+  "app": "gerador-piano-midi",
+  "key": "C#m",
+  "bpm": 72,
+  "seed": 7,
+  "solo": true,
+  "sections": [
+    { "name": "Verso",      "prog": "C#m7:4 A:4 E:4 B:4",             "reps": 2, "emo": "sussurro",  "int": 35, "solo": false },
+    { "name": "Pré-refrão", "prog": "Amaj7:4 B:4 G#m7:4 B:4",         "reps": 1, "emo": "crescendo", "int": 50, "solo": true },
+    { "name": "Refrão",     "prog": "C#m7:4 A:4 E:4 B:4",             "reps": 2, "emo": "climax",    "int": 80, "solo": true },
+    { "name": "Final",      "prog": "Amaj7:4 C#m7:4 Amaj7:4 C#m7:8",  "reps": 1, "emo": "sussurro",  "int": 30, "solo": false }
+  ]
+}
