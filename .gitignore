@@ -1,0 +1,9 @@
+# MIDIs de referência são músicas de terceiros: ficam só no seu computador
+references/*
+!references/README.md
+web/tests/out_*.mid
+web/dist/test.html
+out/
+__pycache__/
+*.pyc
+node_modules/
