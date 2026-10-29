@@ -32,8 +32,8 @@ header p{margin:0;color:var(--muted);flex:1 1 320px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px;min-width:0}
 h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 10px}
 label,.lab{display:block;font-size:12.5px;color:var(--muted);margin-bottom:3px}
-input[type=text],input[type=number],select{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:6px 8px}
-input[type=text]{font-family:var(--mono);font-size:13px}
+input[type=text],input[type=number],select,textarea{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:6px 8px}
+input[type=text],textarea{font-family:var(--mono);font-size:13px}
 input:focus-visible,select:focus-visible,button:focus-visible,.drop:focus-within,.seg input:focus-visible+span{outline:2px solid var(--accent);outline-offset:1px}
 .row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
 .row>*{flex:1 1 90px;min-width:0}
@@ -62,6 +62,7 @@ button.primary:hover{filter:brightness(1.08);background:var(--accent)}
 .sec .top{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
 .sec .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;align-items:end}
 .sec .rm{padding:4px 9px;color:var(--muted)}
+[hidden]{display:none!important}
 .chip{font-family:var(--mono);font-size:12.5px;border:1px solid var(--line);border-radius:4px;padding:2px 7px;background:var(--bg)}
 .chip small{color:var(--muted);margin-left:5px;font-size:11px}
 .sl{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:0 8px;align-items:center}
@@ -113,6 +114,18 @@ input[type=range]{width:100%;accent-color:var(--accent)}
         </label>
         <ul class="refs" id="refList"></ul>
         <p class="hint">Os arquivos não saem do seu navegador. A página guarda só o perfil de cada um (ritmo e acordes).</p>
+      </section>
+
+      <section class="card" aria-labelledby="h-cif">
+        <h2 id="h-cif">Cifra (colar texto)</h2>
+        <label for="cifraTxt">Cole a cifra de uma música (Cifra Club ou parecido), com os acordes em cima da letra e as partes entre colchetes</label>
+        <textarea id="cifraTxt" rows="7" spellcheck="false" placeholder="[Intro] E B C#m7 A7M&#10;&#10;[Verso 1]&#10;E          B&#10;Letra da música aqui&#10;C#m7       A7M&#10;mais um pedaço da letra&#10;&#10;[Refrão]&#10;E | B | C#m7 | A7M"></textarea>
+        <div class="row" style="margin-top:10px">
+          <div><label for="cifBeats">Cada acorde dura</label><select id="cifBeats"><option value="4" selected>1 compasso</option><option value="2">meio compasso</option><option value="8">2 compassos</option></select></div>
+          <button type="button" class="primary" id="cifraGo">Ler cifra</button>
+        </div>
+        <p class="hint" id="cifraOut" style="margin:8px 0 0"></p>
+        <p class="hint">Cada parte vira uma seção, com emoção sugerida pelo nome (Verso calmo, Pré-Refrão crescendo, Refrão forte). Use barras para dividir o compasso: <span style="font-family:var(--mono)">E | B C#m | A</span>. A cifra não traz andamento: ajuste o BPM.</p>
       </section>
 
       <section class="card" aria-labelledby="h-gui">
@@ -732,6 +745,80 @@ function chordGuideFromMidi(name, buf, perBar = 1){
   return {name, key: keyText, bpm: Math.round(m.bpm * 10) / 10, bars: Math.ceil(nw / perBar), nNotes: notes.length, windows: list,
     prog: out.map(([n, b]) => n + ':' + b).join(' ')};
 }
+
+/* ---------- Cifra colada (Cifra Club e parecidos): acordes em cima da letra, com [Seções] ---------- */
+function normChord(tok){
+  const m = /^([A-G][#b]?)(.*?)(?:\/([A-G][#b]?))?$/.exec(tok.trim()); if (!m) return null;
+  let q = m[2].replace(/[()\s]/g, ''), out;
+  if (/^(dim|º|°|o)/i.test(q) && !/^(o)$/.test('x')) out = 'dim';
+  else if (/m7b5|m7\(?5-|ø|m7-5/i.test(q)) out = 'm7b5';
+  else if (/^(aug|\+)/.test(q)) out = 'aug';
+  else if (/^m(?!aj)/.test(q)) out = /9/.test(q) ? 'm9' : /6/.test(q) && !/7/.test(q) ? 'm6' : /7/.test(q) ? 'm7' : 'm';
+  else if (/^(maj|M|7M|7\+)/.test(q)) out = /9/.test(q) ? 'maj9' : 'maj7';
+  else if (/^sus2|^2/.test(q)) out = 'sus2';
+  else if (/^sus|^4/.test(q)) out = 'sus4';
+  else if (/^add9/.test(q)) out = 'add9';
+  else if (/^9/.test(q)) out = '9';
+  else if (/^7/.test(q)) out = '7';
+  else if (/^6/.test(q)) out = '6';
+  else out = '';
+  let name = m[1] + out + (m[3] ? '/' + m[3] : '');
+  try { parseChord(name); } catch (e){ try { parseChord(m[1] + out); name = m[1] + out; } catch (e2){ return null; } }
+  return name;
+}
+const CIF_FILL = /^(\||\|\||-|–|—|\/|:|\.{2,}|N\.?C\.?|x\d+|\d+x|\(?\d+x\)?|\(|\)|\[|\]|%)$/i;
+function keyFromChords(names, weights){
+  const cs = names.map(n => parseChord(n)); let best = null, bs = -1e9;
+  for (let r = 0; r < 12; r++) for (const minor of [false, true]){
+    const sc = scalePcs([r, minor ? 'minor' : 'major']); let s = 0;
+    cs.forEach(([root, q], i) => { const pcs = chordPcs(root, q.startsWith('sus') ? '' : q); const inn = pcs.filter(p => sc.has(p)).length / pcs.length; s += (inn === 1 ? 1 : inn - 1.2) * weights[i]; });
+    const tonic = (r), triadOK = (c) => c && c[0] === tonic && (minor ? isMin(c[1]) : !isMin(c[1]));
+    if (triadOK(cs[0])) s += 1.2; if (triadOK(cs[cs.length - 1])) s += 1.2; if (cs.some(triadOK)) s += 0.8;
+    if (s > bs){ bs = s; best = NAMES[r] + (minor ? 'm' : ''); }
+  }
+  return best;
+}
+function parseCifra(text, beatsPerChord = 4){
+  const secs = [], warn = []; let cur = null;
+  const EMO = [[/intro/i, 'sussurro', 30, false], [/pr[eé]/i, 'crescendo', 50, true], [/refr|chorus|coro/i, 'climax', 80, true], [/ponte|bridge/i, 'crescendo', 55, true],
+    [/final|outro|coda|fim/i, 'sussurro', 30, false], [/solo|instrum|interl/i, 'balada', 55, true], [/verso|estrofe|verse|parte/i, 'sussurro', 38, false]];
+  const open = name => { const e = EMO.find(x => x[0].test(name)) || [null, 'balada', 50, true]; cur = {name, chords: [], lyric: '', emo: e[1], int: e[2], solo: e[3]}; secs.push(cur); };
+  const isHeading = l => /^\s*\[[^\]]+\]\s*$/.test(l) || /^\s*(intro|verso|estrofe|pr[eé][- ]?refr|refr|ponte|solo|final|outro|coda|bridge|chorus|verse|interl|parte)[^\n]{0,24}:?\s*$/i.test(l) && !/[a-záéíóúãõç]{4,}\s+[a-záéíóúãõç]{3,}\s+[a-záéíóúãõç]{3,}/i.test(l);
+  const lines = []; for (const l of String(text).replace(/\r/g, '').split('\n')){ const m = /^\s*(\[[^\]]+\])\s*(\S.*)$/.exec(l); if (m){ lines.push(m[1]); lines.push(m[2]); } else lines.push(l); }
+  for (const raw of lines){
+    const line = raw.trim(); if (!line) continue;
+    if (/^(tom|capo|afina|tab|letra|cifra)\s*[:\-]/i.test(line)) continue;
+    const toks = line.replace(/[\[\]]/g, ' ').split(/\s+/).filter(Boolean);
+    const chordToks = toks.filter(t => !CIF_FILL.test(t));
+    const chords = chordToks.map(t => normChord(t));
+    const heading = isHeading(raw) && (/^\s*\[/.test(raw) || !chords.every(c => c));
+    if (heading){ open(line.replace(/[\[\]:]/g, '').trim()); continue; }
+    // uma linha de acordes: tudo são acordes (ou marcas) e há pelo menos um
+    if (chordToks.length && chords.every(c => c)){
+      if (!cur) open('Música');
+      // barras "|" separam compassos: acordes entre duas barras dividem o compasso
+      if (toks.includes('|')){
+        let bar = [];
+        const flush = () => { if (bar.length){ for (const c of bar) cur.chords.push([c, 4 / bar.length]); bar = []; } };
+        for (const t of toks){ if (t === '|' || t === '||') flush(); else if (!CIF_FILL.test(t)) bar.push(normChord(t)); }
+        flush();
+      } else for (const c of chords) cur.chords.push([c, beatsPerChord]);
+      continue;
+    }
+    const bad = chordToks.filter((t, i) => !chords[i]);
+    if (bad.length && bad.length === chordToks.length && toks.length <= 3 && /^[A-G]/.test(toks[0]) && !/[a-z]{3,}/.test(line)) warn.push('Acorde não reconhecido: ' + bad.join(' '));
+    if (cur && !cur.lyric) cur.lyric = line.slice(0, 80);
+  }
+  const keep = secs.filter(x => x.chords.length);
+  if (!keep.length) throw new Error('Não achei acordes nesse texto. Cole a cifra com os acordes em linhas próprias (como no Cifra Club).');
+  const all = keep.flatMap(x => x.chords);
+  const key = keyFromChords(all.map(c => c[0]), all.map(c => c[1]));
+  const sections = keep.map(x => {
+    const merged = []; for (const [c, b] of x.chords){ if (merged.length && merged[merged.length - 1][0] === c) merged[merged.length - 1][1] += b; else merged.push([c, b]); }
+    return {name: x.name, prog: merged.map(([c, b]) => c + ':' + b).join(' '), reps: 1, emo: x.emo, int: x.int, solo: x.solo, lyric: x.lyric};
+  });
+  return {sections, key, nChords: all.length, warnings: [...new Set(warn)]};
+}
 function generate(o){
   const rng = makeRng(o.seed); let segs;
   if (o.sections && o.sections.length) segs = buildSections(o.sections);
@@ -871,7 +958,7 @@ function makeZip(files){
 }
 
 return {NAMES, parseChord, parseKey, parseProgression, parseMidi, analyzeMidi, aggregateProfile, progressionFromChords,
-  generate, buildSections, chordGuideFromMidi, vocalFromMidi, suggestChords, vocalEvents, humanize, writeMidi, makeZip, PPQ, TPS, msToTicks, chordName};
+  generate, buildSections, parseCifra, chordGuideFromMidi, vocalFromMidi, suggestChords, vocalEvents, humanize, writeMidi, makeZip, PPQ, TPS, msToTicks, chordName};
 })();
 
 
@@ -902,21 +989,30 @@ const SEC_DEFAULT = [
 function addSection(o){
   const d = document.createElement('div'); d.className = 'sec';
   const uid = Math.random().toString(36).slice(2, 7);
-  d.innerHTML = '<div class="top"><div><label>Nome</label><input type="text" class="sn" spellcheck="false" autocomplete="off"></div><button type="button" class="rm" aria-label="Remover seção">Remover</button></div>' +
+  d.innerHTML = '<p class="hint lyr" style="margin:0" hidden></p><div class="top"><div><label>Nome</label><input type="text" class="sn" spellcheck="false" autocomplete="off"></div><button type="button" class="rm" aria-label="Remover seção">Remover</button></div>' +
     '<div><label>Acordes (batidas depois de :)</label><input type="text" class="sp" spellcheck="false" autocomplete="off"></div>' +
     '<div class="two"><div><label>Emoção</label><select class="se"></select></div><div><label>Repetições</label><select class="sr"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>' +
     '<div class="sl"><label>Intensidade</label><input type="range" class="si" min="0" max="100" step="1"><output class="sio"></output></div></div>' +
     '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" class="ss"> Solo nesta seção</label>';
   const e = d.querySelector('.se'); for (const [v, t] of EMOS){ const op = document.createElement('option'); op.value = v; op.textContent = t; e.appendChild(op); }
   d.querySelector('.sn').value = o.name; d.querySelector('.sp').value = o.prog; e.value = o.emo; d.querySelector('.sr').value = String(o.reps);
+  d.dataset.lyric = o.lyric || ''; const ly = d.querySelector('.lyr'); if (o.lyric){ ly.textContent = '“' + o.lyric + '…”'; ly.hidden = false; }
   d.querySelector('.si').value = o.int; d.querySelector('.ss').checked = !!o.solo; d.querySelector('.sio').textContent = o.int;
   d.querySelector('.rm').onclick = () => { d.remove(); regenerate(); };
   $('secList').appendChild(d);
 }
 function readSections(){
   return [...document.querySelectorAll('#secList .sec')].map(d => ({name: d.querySelector('.sn').value, prog: d.querySelector('.sp').value, emo: d.querySelector('.se').value,
-    reps: parseInt(d.querySelector('.sr').value, 10), int: parseInt(d.querySelector('.si').value, 10), solo: d.querySelector('.ss').checked}));
+    reps: parseInt(d.querySelector('.sr').value, 10), int: parseInt(d.querySelector('.si').value, 10), solo: d.querySelector('.ss').checked, lyric: d.dataset.lyric || ''}));
 }
+$('cifraGo').onclick = () => {
+  try {
+    const r = PGM.parseCifra($('cifraTxt').value, parseInt($('cifBeats').value, 10));
+    setSections(r.sections); $('useSec').checked = true; keySel.value = r.key; regenerate();
+    $('cifraOut').textContent = r.sections.length + ' parte(s), ' + r.nChords + ' acordes, tom provável ' + r.key + (r.warnings.length ? ' · ' + r.warnings.join('; ') : '') + '. Confira o tom e o andamento, e as seções logo abaixo.';
+    toast('Cifra lida: ' + r.sections.length + ' seções montadas.');
+  } catch (err){ $('cifraOut').textContent = ''; toast(err.message, true); }
+};
 S.guide = null;
 function applyGuide(){
   const f = S.guide; if (!f) return;
@@ -1125,7 +1221,7 @@ function loadRecipe(o){
   const set = (id, v) => { if (v !== undefined && v !== null) $(id).value = String(v); };
   const hasSec = !!(o.sections && o.sections.length);
   if (!hasSec && !o.prog) throw new Error('A receita precisa ter "sections" ou "prog".');
-  set('prog', o.prog); $('useSec').checked = hasSec; if (hasSec) setSections(o.sections.map(x => ({name: x.name || 'Seção', prog: x.prog, reps: x.reps || 1, emo: x.emo || 'balada', int: x.int ?? 55, solo: x.solo !== false})));
+  set('prog', o.prog); $('useSec').checked = hasSec; if (hasSec) setSections(o.sections.map(x => ({name: x.name || 'Seção', prog: x.prog, reps: x.reps || 1, emo: x.emo || 'balada', int: x.int ?? 55, solo: x.solo !== false, lyric: x.lyric || ''})));
   if (o.key){ const FL = {Db: 'C#', Eb: 'D#', Gb: 'F#', Ab: 'G#', Bb: 'A#'}, m = /^([A-G][#b]?)(m?)$/.exec(String(o.key).trim()); if (m) keySel.value = (FL[m[1]] || m[1]) + m[2]; }
   set('bpm', o.bpm); set('repeats', o.repeats); set('seed', o.seed); set('rhythm', o.rhythm);
   if (o.solo !== undefined) $('solo').checked = !!o.solo; if (o.soloStartBar !== undefined) $('soloStart').value = o.soloStartBar + 1;

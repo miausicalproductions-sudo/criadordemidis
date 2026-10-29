@@ -485,6 +485,80 @@ function chordGuideFromMidi(name, buf, perBar = 1){
   return {name, key: keyText, bpm: Math.round(m.bpm * 10) / 10, bars: Math.ceil(nw / perBar), nNotes: notes.length, windows: list,
     prog: out.map(([n, b]) => n + ':' + b).join(' ')};
 }
+
+/* ---------- Cifra colada (Cifra Club e parecidos): acordes em cima da letra, com [Seções] ---------- */
+function normChord(tok){
+  const m = /^([A-G][#b]?)(.*?)(?:\/([A-G][#b]?))?$/.exec(tok.trim()); if (!m) return null;
+  let q = m[2].replace(/[()\s]/g, ''), out;
+  if (/^(dim|º|°|o)/i.test(q) && !/^(o)$/.test('x')) out = 'dim';
+  else if (/m7b5|m7\(?5-|ø|m7-5/i.test(q)) out = 'm7b5';
+  else if (/^(aug|\+)/.test(q)) out = 'aug';
+  else if (/^m(?!aj)/.test(q)) out = /9/.test(q) ? 'm9' : /6/.test(q) && !/7/.test(q) ? 'm6' : /7/.test(q) ? 'm7' : 'm';
+  else if (/^(maj|M|7M|7\+)/.test(q)) out = /9/.test(q) ? 'maj9' : 'maj7';
+  else if (/^sus2|^2/.test(q)) out = 'sus2';
+  else if (/^sus|^4/.test(q)) out = 'sus4';
+  else if (/^add9/.test(q)) out = 'add9';
+  else if (/^9/.test(q)) out = '9';
+  else if (/^7/.test(q)) out = '7';
+  else if (/^6/.test(q)) out = '6';
+  else out = '';
+  let name = m[1] + out + (m[3] ? '/' + m[3] : '');
+  try { parseChord(name); } catch (e){ try { parseChord(m[1] + out); name = m[1] + out; } catch (e2){ return null; } }
+  return name;
+}
+const CIF_FILL = /^(\||\|\||-|–|—|\/|:|\.{2,}|N\.?C\.?|x\d+|\d+x|\(?\d+x\)?|\(|\)|\[|\]|%)$/i;
+function keyFromChords(names, weights){
+  const cs = names.map(n => parseChord(n)); let best = null, bs = -1e9;
+  for (let r = 0; r < 12; r++) for (const minor of [false, true]){
+    const sc = scalePcs([r, minor ? 'minor' : 'major']); let s = 0;
+    cs.forEach(([root, q], i) => { const pcs = chordPcs(root, q.startsWith('sus') ? '' : q); const inn = pcs.filter(p => sc.has(p)).length / pcs.length; s += (inn === 1 ? 1 : inn - 1.2) * weights[i]; });
+    const tonic = (r), triadOK = (c) => c && c[0] === tonic && (minor ? isMin(c[1]) : !isMin(c[1]));
+    if (triadOK(cs[0])) s += 1.2; if (triadOK(cs[cs.length - 1])) s += 1.2; if (cs.some(triadOK)) s += 0.8;
+    if (s > bs){ bs = s; best = NAMES[r] + (minor ? 'm' : ''); }
+  }
+  return best;
+}
+function parseCifra(text, beatsPerChord = 4){
+  const secs = [], warn = []; let cur = null;
+  const EMO = [[/intro/i, 'sussurro', 30, false], [/pr[eé]/i, 'crescendo', 50, true], [/refr|chorus|coro/i, 'climax', 80, true], [/ponte|bridge/i, 'crescendo', 55, true],
+    [/final|outro|coda|fim/i, 'sussurro', 30, false], [/solo|instrum|interl/i, 'balada', 55, true], [/verso|estrofe|verse|parte/i, 'sussurro', 38, false]];
+  const open = name => { const e = EMO.find(x => x[0].test(name)) || [null, 'balada', 50, true]; cur = {name, chords: [], lyric: '', emo: e[1], int: e[2], solo: e[3]}; secs.push(cur); };
+  const isHeading = l => /^\s*\[[^\]]+\]\s*$/.test(l) || /^\s*(intro|verso|estrofe|pr[eé][- ]?refr|refr|ponte|solo|final|outro|coda|bridge|chorus|verse|interl|parte)[^\n]{0,24}:?\s*$/i.test(l) && !/[a-záéíóúãõç]{4,}\s+[a-záéíóúãõç]{3,}\s+[a-záéíóúãõç]{3,}/i.test(l);
+  const lines = []; for (const l of String(text).replace(/\r/g, '').split('\n')){ const m = /^\s*(\[[^\]]+\])\s*(\S.*)$/.exec(l); if (m){ lines.push(m[1]); lines.push(m[2]); } else lines.push(l); }
+  for (const raw of lines){
+    const line = raw.trim(); if (!line) continue;
+    if (/^(tom|capo|afina|tab|letra|cifra)\s*[:\-]/i.test(line)) continue;
+    const toks = line.replace(/[\[\]]/g, ' ').split(/\s+/).filter(Boolean);
+    const chordToks = toks.filter(t => !CIF_FILL.test(t));
+    const chords = chordToks.map(t => normChord(t));
+    const heading = isHeading(raw) && (/^\s*\[/.test(raw) || !chords.every(c => c));
+    if (heading){ open(line.replace(/[\[\]:]/g, '').trim()); continue; }
+    // uma linha de acordes: tudo são acordes (ou marcas) e há pelo menos um
+    if (chordToks.length && chords.every(c => c)){
+      if (!cur) open('Música');
+      // barras "|" separam compassos: acordes entre duas barras dividem o compasso
+      if (toks.includes('|')){
+        let bar = [];
+        const flush = () => { if (bar.length){ for (const c of bar) cur.chords.push([c, 4 / bar.length]); bar = []; } };
+        for (const t of toks){ if (t === '|' || t === '||') flush(); else if (!CIF_FILL.test(t)) bar.push(normChord(t)); }
+        flush();
+      } else for (const c of chords) cur.chords.push([c, beatsPerChord]);
+      continue;
+    }
+    const bad = chordToks.filter((t, i) => !chords[i]);
+    if (bad.length && bad.length === chordToks.length && toks.length <= 3 && /^[A-G]/.test(toks[0]) && !/[a-z]{3,}/.test(line)) warn.push('Acorde não reconhecido: ' + bad.join(' '));
+    if (cur && !cur.lyric) cur.lyric = line.slice(0, 80);
+  }
+  const keep = secs.filter(x => x.chords.length);
+  if (!keep.length) throw new Error('Não achei acordes nesse texto. Cole a cifra com os acordes em linhas próprias (como no Cifra Club).');
+  const all = keep.flatMap(x => x.chords);
+  const key = keyFromChords(all.map(c => c[0]), all.map(c => c[1]));
+  const sections = keep.map(x => {
+    const merged = []; for (const [c, b] of x.chords){ if (merged.length && merged[merged.length - 1][0] === c) merged[merged.length - 1][1] += b; else merged.push([c, b]); }
+    return {name: x.name, prog: merged.map(([c, b]) => c + ':' + b).join(' '), reps: 1, emo: x.emo, int: x.int, solo: x.solo, lyric: x.lyric};
+  });
+  return {sections, key, nChords: all.length, warnings: [...new Set(warn)]};
+}
 function generate(o){
   const rng = makeRng(o.seed); let segs;
   if (o.sections && o.sections.length) segs = buildSections(o.sections);
@@ -624,6 +698,6 @@ function makeZip(files){
 }
 
 return {NAMES, parseChord, parseKey, parseProgression, parseMidi, analyzeMidi, aggregateProfile, progressionFromChords,
-  generate, buildSections, chordGuideFromMidi, vocalFromMidi, suggestChords, vocalEvents, humanize, writeMidi, makeZip, PPQ, TPS, msToTicks, chordName};
+  generate, buildSections, parseCifra, chordGuideFromMidi, vocalFromMidi, suggestChords, vocalEvents, humanize, writeMidi, makeZip, PPQ, TPS, msToTicks, chordName};
 })();
 if (typeof module !== 'undefined') module.exports = PGM;
