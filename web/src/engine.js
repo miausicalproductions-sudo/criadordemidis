@@ -271,14 +271,18 @@ function lhLadder(seg){
   const t = r + 12 + (isMin(seg.q) || seg.q.startsWith('dim') ? 3 : seg.q.startsWith('sus') ? (seg.q === 'sus4' ? 5 : 2) : 4);
   return [r, r + sixth, r + 12, t, r + 12 + sixth];
 }
-function genBallad(segs, total, rng, texture){
+function genBallad(segs, total, rng, texture, V){
   const nbars = Math.ceil(total / 16), notes = []; let grp = 0, prevV = null; const segV = new Map();
-  const voice = seg => { if (!segV.has(seg.start)){ const v = voiceRh(seg, prevV, 60, 79); segV.set(seg.start, v); prevV = v; } return segV.get(seg.start); };
+  const voice = seg => { if (!segV.has(seg.start)){ let lo = 60, hi = 79;
+    if (V){ const r = V.range(seg.start, seg.start + seg.length);
+      if (r){ if (r[1] < 55){ lo = Math.min(r[1] + 3, 76); hi = lo + 19; } else { hi = Math.max(58, Math.min(79, r[0] - 1)); lo = Math.max(46, hi - 17); } } }
+    const v = voiceRh(seg, prevV, lo, hi); segV.set(seg.start, v); prevV = v; } return segV.get(seg.start); };
   const EMO_TEX = {sussurro: 'whisper', balada: 'ballad', crescendo: 'arpeggio', climax: 'climax'};
   let rhPat = [0, 8];
   for (let b = 0; b < nbars; b++){
     const base = b * 16;
     const sg0 = segAt(segs, base), tx = (sg0.emo && EMO_TEX[sg0.emo]) || texture;
+    const dense = !!V && V.count(base, base + 16) >= 6;
     const lhArp = tx === 'ballad', rhArp = tx === 'arpeggio', climax = tx === 'climax', whisper = tx === 'whisper';
     if (lhArp){
       const idx = [0, 1, 2, 3, 2, 1, 2, 3], drop = rng() < 0.35 ? 1 + Math.floor(rng() * 7) : -1;
@@ -305,18 +309,19 @@ function genBallad(segs, total, rng, texture){
       const idx = [0, 1, 2, 3, 2, 1, 2, 1], drop = rng() < 0.3 ? 1 + Math.floor(rng() * 7) : -1;
       for (let k = 0; k < 8; k++){
         const g = base + k * 2; if (g >= total || k === drop) continue;
+        if (dense && k % 2) continue;
         const seg = segAt(segs, g), v = voice(seg), lad = v.concat([v[0] + 12]), end = Math.min(seg.start + seg.length, g + 4);
         grp++; notes.push({start: g, dur: Math.max(1, end - g), pitch: lad[idx[k] % lad.length], track: 'rh', group: grp, role: 'inner', lg: [0.95, 1.1]});
       }
     } else if (climax){
-      [0, 4, 8, 12].forEach((h, k, arr) => {
+      (dense ? [0, 8] : [0, 4, 8, 12]).forEach((h, k, arr) => {
         const g = base + h; if (g >= total) return; const seg = segAt(segs, g), v = voice(seg);
         const end = Math.min(k + 1 < arr.length ? base + arr[k + 1] : base + 16, seg.start + seg.length);
         grp++; v.forEach((pitch, i) => notes.push({start: g, dur: Math.max(1, end - g), pitch, track: 'rh', group: grp, role: i === v.length - 1 ? 'top' : 'inner', lg: [0.96, 1.02]}));
-        notes.push({start: g, dur: Math.max(1, end - g), pitch: v[v.length - 1] + 12, track: 'rh', group: grp, role: 'top', lg: [0.96, 1.02]});
+        if (!V) notes.push({start: g, dur: Math.max(1, end - g), pitch: v[v.length - 1] + 12, track: 'rh', group: grp, role: 'top', lg: [0.96, 1.02]});
       });
     } else {
-      if (whisper) rhPat = rng() < 0.5 ? [0] : [0, 8]; else if (b % 2 === 0) rhPat = rng.choice([[0, 8], [0, 8], [0, 10], [0, 6, 10]]); else if (rng() < 0.4) rhPat = rng.choice([[0, 8], [0, 10], [0, 12]]);
+      if (whisper || dense) rhPat = rng() < (dense ? 0.6 : 0.5) ? [0] : [0, 8]; else if (b % 2 === 0) rhPat = rng.choice([[0, 8], [0, 8], [0, 10], [0, 6, 10]]); else if (rng() < 0.4) rhPat = rng.choice([[0, 8], [0, 10], [0, 12]]);
       rhPat.forEach((h, k) => {
         const g = base + h; if (g >= total) return; const seg = segAt(segs, g), v = voice(seg);
         let end = k + 1 < rhPat.length ? base + rhPat[k + 1] : base + 16; end = Math.min(end, seg.start + seg.length);
@@ -378,16 +383,79 @@ function buildSections(sections){
   });
   return segs;
 }
+
+/* ---------- Voz guia (MIDI do Melodyne): o acompanhamento se desenha em volta dela ---------- */
+function vocalFromMidi(buf){
+  const m = parseMidi(buf), k = 4 / m.ppq;
+  const ns = m.notes.map(n => ({start: n.start * k, dur: (n.end - n.start) * k, pitch: n.pitch, vel: n.vel})).filter(n => n.dur >= 0.5);
+  if (!ns.length) throw new Error('Não achei notas nesse MIDI.');
+  const r = x => Math.round(x * 1000) / 1000, end = Math.max(...ns.map(n => n.start + n.dur));
+  return {notes: ns.map(n => ({start: r(n.start), dur: r(n.dur), pitch: n.pitch, vel: n.vel})), bars: Math.ceil(end / 16), key: guessKey(m.notes), bpm: Math.round(m.bpm * 10) / 10};
+}
+function vocalCtx(v){
+  if (!v || !v.notes || !v.notes.length) return null;
+  const ns = v.notes, ov = (a, b) => ns.filter(n => n.start < b && n.start + n.dur > a);
+  const rests = []; let t = 0;
+  for (const n of ns){ if (n.start - t >= 6) rests.push([t, n.start]); t = Math.max(t, n.start + n.dur); }
+  rests.push([t, 1e9]);
+  return {ns, ov, rests, count: (a, b) => ov(a, b).length,
+    range: (a, b) => { const o = ov(a, b); return o.length ? [Math.min(...o.map(n => n.pitch)), Math.max(...o.map(n => n.pitch))] : null; }};
+}
+function suggestChords(vnotes, keyText, perBar = 1, bars = null){
+  const key = parseKey(keyText), minor = key[1] === 'minor', sc = minor ? MINOR : MAJOR;
+  const nb = bars || Math.ceil(Math.max(...vnotes.map(n => n.start + n.dur)) / 16), W = 16 / perBar, nw = nb * perBar;
+  const cands = [];
+  for (let d = 0; d < 7; d++){
+    const iv = [0, 2, 4, 6].map(k => (sc[(d + k) % 7] - sc[d] + 12) % 12), root = (key[0] + sc[d]) % 12;
+    const q3 = iv[1] === 3 ? (iv[2] === 6 ? 'dim' : 'm') : '';
+    const seventh = (root + iv[3]) % 12, tri = [root, (root + iv[1]) % 12, (root + iv[2]) % 12];
+    const q7 = q3 === 'dim' ? 'm7b5' : q3 === 'm' ? 'm7' : (iv[3] === 11 ? 'maj7' : '7');
+    cands.push({d, root, tri, seventh, q3, q7, prior: [.25, .05, .1, .2, .25, .15, 0][d]});
+  }
+  const sc2 = [];
+  for (let w = 0; w < nw; w++){
+    const a = w * W, b = a + W, h = new Array(12).fill(0); let tot = 0;
+    for (const n of vnotes){ const o = Math.min(b, n.start + n.dur) - Math.max(a, n.start); if (o > 0){ h[n.pitch % 12] += o; tot += o; } }
+    sc2.push(cands.map(c => { if (!tot) return 0; let s = 0; for (let pc = 0; pc < 12; pc++) s += (c.tri.includes(pc) ? 1 : -0.8) * h[pc] / tot; return s + c.prior + (h[c.root] / tot) * 0.3; }));
+  }
+  const CH = 0.15, best = [], from = [];
+  for (let w = 0; w < nw; w++){
+    best.push(cands.map((_, i) => { let bv = -1e9, bf = 0; for (let j = 0; j < 7; j++){ const v = (w ? best[w - 1][j] : 0) - (w && j !== i ? CH : 0); if (v > bv){ bv = v; bf = j; } } return bv + sc2[w][i]; }));
+    from.push(cands.map((_, i) => { let bv = -1e9, bf = 0; for (let j = 0; j < 7; j++){ const v = (w ? best[w - 1][j] : 0) - (w && j !== i ? CH : 0); if (v > bv){ bv = v; bf = j; } } return bf; }));
+  }
+  let st = best[nw - 1].indexOf(Math.max(...best[nw - 1])); const path = new Array(nw);
+  for (let w = nw - 1; w >= 0; w--){ path[w] = st; st = from[w][st]; }
+  const names = path.map((d, w) => {
+    const c = cands[d], a = w * W, b = a + W, sw = vnotes.reduce((x, n) => { const o = Math.min(b, n.start + n.dur) - Math.max(a, n.start); return n.pitch % 12 === c.seventh && o > 0 ? x + o : x; }, 0);
+    const all = vnotes.reduce((x, n) => { const o = Math.min(b, n.start + n.dur) - Math.max(a, n.start); return o > 0 ? x + o : x; }, 0);
+    return NAMES[c.root] + (all && sw > 0.25 * all ? c.q7 : c.q3);
+  });
+  const out = [];
+  for (const n of names){ if (out.length && out[out.length - 1][0] === n) out[out.length - 1][1] += 4 / perBar; else out.push([n, 4 / perBar]); }
+  return out.map(([n, b]) => n + ':' + b).join(' ');
+}
+function fitFills(sol, V){
+  const out = [];
+  for (const n of sol){
+    const w = V.rests.find(r => n.start >= r[0] + 1 && n.start < r[1] - 1); if (!w) continue;
+    const end = Math.min(n.start + n.dur, w[1] - 1); if (end - n.start >= 1) out.push({...n, dur: end - n.start, fill: true});
+  }
+  return out;
+}
+function vocalEvents(v){
+  return (v && v.notes ? v.notes : []).map(n => ({on: Math.round(n.start * TPS), off: Math.round((n.start + n.dur) * TPS), pitch: n.pitch, vel: n.vel, track: 'voz'}));
+}
 function generate(o){
   const rng = makeRng(o.seed); let segs;
   if (o.sections && o.sections.length) segs = buildSections(o.sections);
   else { segs = parseProgression(o.prog);
-  if (o.repeats > 1){ const L = segs.reduce((s, x) => s + x.length, 0), base = segs; segs = [];
+  if (o.repeats > 1 && !o.vocal){ const L = segs.reduce((s, x) => s + x.length, 0), base = segs; segs = [];
     for (let k = 0; k < o.repeats; k++) for (const s of base) segs.push({...s, start: s.start + k * L}); } }
   const last = segs[segs.length - 1], total = last.start + last.length, key = parseKey(o.key);
   const tex = o.texture || 'driving';
-  let notes = tex === 'driving' && !(o.sections && o.sections.length) ? genComping(segs, total, rng, o.profile, o.rhythm, {lh: o.lhDensity, rh: o.rhDensity}) : genBallad(segs, total, rng, tex);
-  if (o.solo) notes = notes.concat(genSolo(segs, total, key, rng, o.soloStartBar).filter(n => segAt(segs, n.start).solo !== false));
+  let notes = tex === 'driving' && !(o.sections && o.sections.length) ? genComping(segs, total, rng, o.profile, o.rhythm, {lh: o.lhDensity, rh: o.rhDensity}) : genBallad(segs, total, rng, tex, vocalCtx(o.vocal));
+  const V = vocalCtx(o.vocal);
+  if (o.solo){ let sol = genSolo(segs, total, key, rng, o.soloStartBar); if (V) sol = fitFills(sol, V); notes = notes.concat(sol.filter(n => segAt(segs, n.start).solo !== false)); }
   return {notes, segs, total};
 }
 
@@ -434,7 +502,7 @@ function humanize(notes, segs, bpm, total, seed, cfg){
       const on = n.start * TPS + msToTicks(onMs, bpm);
       // velocity
       const st = Math.floor(n.start), sb = st % 16;
-      let add = ((segAt(segs, st).vint ?? 50) - 50) * 0.4 + accent(sb) + 6 * Math.sin(2 * Math.PI * n.start / 64) + (segStarts.has(st) ? 5 : 0) + 3 * rank[i] * (span > 8 ? 1 : 0);
+      let add = (n.fill ? -6 : 0) + ((segAt(segs, st).vint ?? 50) - 50) * 0.4 + accent(sb) + 6 * Math.sin(2 * Math.PI * n.start / 64) + (segStarts.has(st) ? 5 : 0) + 3 * rank[i] * (span > 8 ? 1 : 0);
       if (trk === 'solo'){ const fr = (n.start % 32) / 32; add += 6 * (2 * Math.sin(Math.PI * (0.15 + 0.7 * fr)) - 1) + (n.pitch - 76) * 0.25 + Math.min(8, n.dur) * 0.3; }
       if (n.role === 'top') add += 7 * c.contrast; else if (n.role === 'inner' && trk === 'rh') add -= 5 * c.contrast; else if (n.role === 'bass') add -= 2;
       let v = base[trk] + A * add + rng.gauss(0, c.velJitter * 0.8) * A;
@@ -516,6 +584,6 @@ function makeZip(files){
 }
 
 return {NAMES, parseChord, parseKey, parseProgression, parseMidi, analyzeMidi, aggregateProfile, progressionFromChords,
-  generate, buildSections, humanize, writeMidi, makeZip, PPQ, TPS, msToTicks, chordName};
+  generate, buildSections, vocalFromMidi, suggestChords, vocalEvents, humanize, writeMidi, makeZip, PPQ, TPS, msToTicks, chordName};
 })();
 if (typeof module !== 'undefined') module.exports = PGM;

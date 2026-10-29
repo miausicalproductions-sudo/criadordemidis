@@ -115,6 +115,22 @@ input[type=range]{width:100%;accent-color:var(--accent)}
         <p class="hint">Os arquivos não saem do seu navegador. A página guarda só o perfil de cada um (ritmo e acordes).</p>
       </section>
 
+      <section class="card" aria-labelledby="h-voz">
+        <h2 id="h-voz">Voz guia (opcional)</h2>
+        <label class="drop" for="vocalFile" style="display:block;cursor:pointer;border:1px dashed var(--line);border-radius:6px;padding:12px;text-align:center"><b>Escolha o MIDI da sua voz</b><br><span class="hint" style="margin:0">Exporte do Melodyne no mesmo andamento do projeto. O piano passa a se desenhar em volta dela.</span></label>
+        <input type="file" id="vocalFile" accept=".mid,.midi" hidden>
+        <div id="vocalInfo" hidden>
+          <p class="hint" id="vocalTxt" style="margin:8px 0"></p>
+          <div class="row">
+            <div><label for="vPer">Acordes sugeridos por compasso</label><select id="vPer"><option value="1">1</option><option value="2">2</option></select></div>
+            <button type="button" id="vKey">Usar tom e andamento da voz</button>
+            <button type="button" id="vChords" class="primary">Sugerir acordes pela voz</button>
+            <button type="button" id="vClear">Remover voz</button>
+          </div>
+          <p class="hint">O piano fica abaixo da voz, toca menos quando ela canta muito e o solo só preenche as pausas. A sugestão de acordes é um ponto de partida: confira de ouvido e corrija na progressão.</p>
+        </div>
+      </section>
+
       <section class="card" aria-labelledby="h-prog">
         <h2 id="h-prog">Progressão</h2>
         <label for="prog">Acordes e duração em batidas (<span style="font-family:var(--mono)">E:2</span> = 2 batidas, sem número = 4)</label>
@@ -189,6 +205,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
             <label><input type="checkbox" data-trk="lh" checked><i class="dot" style="background:var(--lh)"></i>Mão esquerda</label>
             <label><input type="checkbox" data-trk="rh" checked><i class="dot" style="background:var(--rh)"></i>Mão direita</label>
             <label><input type="checkbox" data-trk="solo" checked><i class="dot" style="background:var(--solo)"></i>Solo</label>
+            <label id="vozLab" hidden><input type="checkbox" data-trk="voz" checked><i class="dot" style="background:var(--muted)"></i>Voz guia</label>
           </div>
           <span class="stat" id="stat"></span>
         </div>
@@ -223,7 +240,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 'use strict';
 (() => {
 const $ = id => document.getElementById(id);
-const S = {refs: [], errors: [], listen: 'human', mute: {lh: false, rh: false, solo: false}, result: null, play: null};
+const S = {refs: [], errors: [], listen: 'human', mute: {lh: false, rh: false, solo: false, voz: false}, vocal: null, result: null, play: null};
 const LS_KEY = 'pgm.refs.v1';
 
 /* ---------- opções de tom ---------- */
@@ -260,10 +277,26 @@ function readSections(){
   return [...document.querySelectorAll('#secList .sec')].map(d => ({name: d.querySelector('.sn').value, prog: d.querySelector('.sp').value, emo: d.querySelector('.se').value,
     reps: parseInt(d.querySelector('.sr').value, 10), int: parseInt(d.querySelector('.si').value, 10), solo: d.querySelector('.ss').checked}));
 }
+function renderVocal(){
+  const v = S.vocal; $('vocalInfo').hidden = !v; $('vozLab').hidden = !v;
+  if (v) $('vocalTxt').textContent = (v.name || 'voz') + ': ' + v.notes.length + ' notas · ' + v.bars + ' compassos · tom provável ' + v.key + ' · ' + v.bpm + ' BPM no arquivo';
+}
+$('vocalFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try { const v = PGM.vocalFromMidi(await f.arrayBuffer()); v.name = f.name; S.vocal = v; renderVocal(); regenerate(); toast('Voz carregada. Use "Sugerir acordes" se ainda não tiver a progressão.'); }
+  catch (err){ toast('Não consegui ler esse MIDI: ' + err.message, true); }
+});
+$('vKey').onclick = () => { const v = S.vocal; if (!v) return; keySel.value = v.key; $('bpm').value = v.bpm; regenerate(); toast('Tom e andamento ajustados (' + v.key + ', ' + v.bpm + ' BPM).'); };
+$('vChords').onclick = () => {
+  const v = S.vocal; if (!v) return;
+  try { $('prog').value = PGM.suggestChords(v.notes, keySel.value, parseInt($('vPer').value, 10), v.bars); $('useSec').checked = false; $('repeats').value = '1'; regenerate(); toast('Acordes sugeridos para o tom ' + keySel.value + '. Confira de ouvido.'); }
+  catch (err){ toast(err.message, true); }
+};
+$('vClear').onclick = () => { S.vocal = null; renderVocal(); regenerate(); };
 function setSections(list){ $('secList').textContent = ''; list.forEach(addSection); }
 function params(){
   const useSec = $('useSec').checked, sections = useSec ? readSections() : null;
-  return {prog: $('prog').value, sections, key: keySel.value, bpm: Math.min(220, Math.max(40, num('bpm', 106.4))), repeats: parseInt($('repeats').value, 10),
+  return {prog: $('prog').value, sections, vocal: S.vocal, key: keySel.value, bpm: Math.min(220, Math.max(40, num('bpm', 106.4))), repeats: parseInt($('repeats').value, 10),
     seed: Math.max(1, Math.floor(num('seed', 1))), texture: $('texture').value, intensity: num('intensity', 1), rhythm: $('rhythm').value, solo: $('solo').checked,
     soloStartBar: Math.max(0, Math.floor(num('soloStart', 3)) - 1), lhDensity: num('lhD', .28), rhDensity: num('rhD', .22),
     human: num('human', 1), timingSd: num('tsd', 6), strumMs: num('strum', 36), strumProb: num('strumP', 80) / 100, strumDir: $('strumDir').value, lead: num('lead', 12), rubato: num('rubato', 10), contrast: num('contrast', 1), pedal: $('pedal').checked};
@@ -285,8 +318,9 @@ function regenerate(){
   try {
     const prof = PGM.aggregateProfile(S.refs);
     const g = PGM.generate({...p, profile: p.rhythm === 'learned' ? prof : null});
-    const mk = amt => PGM.humanize(g.notes, g.segs, p.bpm, g.total, p.seed, {amount: amt, timingSd: p.timingSd, timingMax: 22, velJitter: 6, vShift: (p.intensity - 1) * 20 + (p.texture === 'driving' && !p.sections ? 0 : -8), strumMs: p.strumMs, strumProb: p.strumProb, strumDir: p.strumDir, lead: p.lead, rubato: p.rubato, contrast: p.contrast, pedal: p.pedal});
-    S.result = {g, p, human: mk(p.human), grid: mk(0), prof};
+    const mk = amt => PGM.humanize(g.notes, g.segs, p.bpm, g.total, p.seed, {amount: amt, timingSd: p.timingSd, timingMax: 22, velJitter: 6, vShift: (p.intensity - 1) * 20 + (p.texture === 'driving' && !p.sections ? 0 : -8), strumMs: p.strumMs, strumProb: p.strumProb, strumDir: p.strumDir, lead: p.lead, rubato: p.vocal ? p.rubato * 0.3 : p.rubato, contrast: p.contrast, pedal: p.pedal});
+    const addV = h => { if (p.vocal) h.events = h.events.concat(PGM.vocalEvents(p.vocal)).sort((a, b) => a.on - b.on || a.pitch - b.pitch); return h; };
+    S.result = {g, p, human: addV(mk(p.human)), grid: addV(mk(0)), prof};
     $('progErr').hidden = true;
     renderChips(g);
     $('rhythmHint').textContent = !drv ? 'Textura de balada: o desenho vem de regras. O ritmo dos seus MIDIs de referência só entra no estilo de acordes batidos.' : p.rhythm === 'learned' && !prof
@@ -328,7 +362,7 @@ function draw(posBeats){
   for (let b = 0; b <= beats; b++){ c.fillStyle = b % 4 === 0 ? css('--roll-bar') : css('--roll-grid'); c.fillRect(Math.round(b * ppb), TOP - (b % 4 === 0 ? 6 : 0), 1, H); }
   c.fillStyle = css('--ink'); c.font = '500 12px ' + css('--mono'); c.textBaseline = 'alphabetic';
   for (const s of R.g.segs) c.fillText(PGM.chordName(s.root, s.q), s.start / 4 * ppb + 4, 15);
-  const col = {lh: css('--lh'), rh: css('--rh'), solo: css('--solo')};
+  const col = {lh: css('--lh'), rh: css('--rh'), solo: css('--solo'), voz: css('--muted')};
   for (const e of ev){
     const w = Math.max(2, X(e.off - e.on) - 1), a = S.mute[e.track] ? 0.1 : 0.35 + 0.65 * e.vel / 127;
     c.globalAlpha = a; c.fillStyle = col[e.track]; c.fillRect(X(e.on), Y(e.pitch) + 0.5, w, Math.max(2, rowH - 1));
@@ -450,6 +484,7 @@ function loadRecipe(o){
     S.refs.push({name: 'perfil da receita', fromRecipe: true, nNotes: null, bars: o.profile.bars, bpm: o.bpm, key: o.key, chords: [],
       low: o.profile.low.map(x => x * o.profile.bars), high: o.profile.high.map(x => x * o.profile.bars)}); saveRefs();
   }
+  if (o.vocal && o.vocal.notes){ S.vocal = o.vocal; renderVocal(); }
   renderRefs(); regenerate();
 }
 
