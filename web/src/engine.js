@@ -399,7 +399,7 @@ function vocalCtx(v){
   for (const n of ns){ if (n.start - t >= 6) rests.push([t, n.start]); t = Math.max(t, n.start + n.dur); }
   rests.push([t, 1e9]);
   return {ns, ov, rests, count: (a, b) => ov(a, b).length,
-    range: (a, b) => { const o = ov(a, b); return o.length ? [Math.min(...o.map(n => n.pitch)), Math.max(...o.map(n => n.pitch))] : null; }};
+    range: (a, b) => { const o = ov(a, b).map(n => n.pitch).sort((x, y) => x - y); return o.length ? [o[Math.floor(0.1 * (o.length - 1))], o[Math.ceil(0.9 * (o.length - 1))]] : null; }};
 }
 function suggestChords(vnotes, keyText, perBar = 1, bars = null){
   const key = parseKey(keyText), minor = key[1] === 'minor', sc = minor ? MINOR : MAJOR;
@@ -444,6 +444,46 @@ function fitFills(sol, V){
 }
 function vocalEvents(v){
   return (v && v.notes ? v.notes : []).map(n => ({on: Math.round(n.start * TPS), off: Math.round((n.start + n.dur) * TPS), pitch: n.pitch, vel: n.vel, track: 'voz'}));
+}
+
+/* ---------- Guia de acordes a partir de um MIDI harmônico (Melodyne, piano, violão...) ----------
+   Janela por compasso (ou meio compasso): soma a duração de cada nota por classe de altura, compara com cada acorde
+   do vocabulário, dá bônus para o baixo e para acordes do tom, e suaviza trocas à toa. */
+const GUIDE_Q = ['', 'm', '7', 'maj7', 'm7', 'sus4', 'dim', 'm7b5'];
+function chordGuideFromMidi(name, buf, perBar = 1){
+  const m = parseMidi(buf); if (!m.notes.length) throw new Error('Sem notas (parece ser só um mapa de andamento).');
+  const notes = cleanNotes(m.notes, m.ppq); if (!notes.length) throw new Error('Sem notas utilizáveis depois da limpeza.');
+  const bar = m.ppq * (m.ts ? m.ts[0] : 4), W = bar / perBar, lastOn = Math.max(...notes.map(n => n.start)), nw = Math.max(1, Math.floor(lastOn / W) + 1);
+  const keyText = guessKey(notes), key = parseKey(keyText), dia = scalePcs(key);
+  const names = []; let prev = null;
+  const rawBass = [];
+  for (let w = 0; w < nw; w++){
+    const lo = w * W, hi = lo + W, inb = notes.filter(n => n.start < hi && n.end > lo);
+    if (inb.length < 2){ names.push(prev); rawBass.push(null); continue; }
+    const h = new Array(12).fill(0); let tot = 0;
+    for (const n of inb){ const ov = Math.min(n.end, hi) - Math.max(n.start, lo); const wt = ov * (n.pitch < 55 ? 1.25 : 1); h[n.pitch % 12] += wt; tot += wt; }
+    let low = null; for (const n of inb) if (n.start < hi && n.end > lo && (!low || n.pitch < low.pitch)) low = n;
+    const bass = low ? low.pitch % 12 : null; rawBass.push(bass);
+    let best = null, bs = -1e18;
+    for (let r = 0; r < 12; r++) for (const q of GUIDE_Q){
+      const pcs = new Set(chordPcs(r, q)); let sc = 0;
+      for (let p = 0; p < 12; p++) sc += pcs.has(p) ? h[p] : -0.8 * h[p];
+      if (bass === r) sc += 0.25 * tot;
+      if (q !== '' && q !== 'm') sc -= 0.12 * tot;                // prefere o simples quando empata
+      if (q === 'sus4' || q === 'dim' || q === 'm7b5') sc -= 0.12 * tot;
+      if (dia.has(r)) sc += 0.08 * tot;
+      if (prev && prev.r === r && prev.q === q) sc += 0.10 * tot; // pequena inércia
+      if (sc > bs){ bs = sc; best = {r, q, bass}; }
+    }
+    names.push(best); prev = best;
+  }
+  const first = names.find(c => c); const ch = names.map(c => c || first);
+  // baixo trocado só quando o baixo é nota do acorde e não é a fundamental
+  const label = (c, i) => { const base = NAMES[c.r] + c.q; const b = rawBass[i]; return b != null && b !== c.r && chordPcs(c.r, c.q).includes(b) && ['', 'm'].includes(c.q) ? base + '/' + NAMES[b] : base; };
+  const list = ch.map(label), out = [];
+  for (const n of list){ if (out.length && out[out.length - 1][0] === n) out[out.length - 1][1] += 4 / perBar; else out.push([n, 4 / perBar]); }
+  return {name, key: keyText, bpm: Math.round(m.bpm * 10) / 10, bars: Math.ceil(nw / perBar), nNotes: notes.length, windows: list,
+    prog: out.map(([n, b]) => n + ':' + b).join(' ')};
 }
 function generate(o){
   const rng = makeRng(o.seed); let segs;
@@ -584,6 +624,6 @@ function makeZip(files){
 }
 
 return {NAMES, parseChord, parseKey, parseProgression, parseMidi, analyzeMidi, aggregateProfile, progressionFromChords,
-  generate, buildSections, vocalFromMidi, suggestChords, vocalEvents, humanize, writeMidi, makeZip, PPQ, TPS, msToTicks, chordName};
+  generate, buildSections, chordGuideFromMidi, vocalFromMidi, suggestChords, vocalEvents, humanize, writeMidi, makeZip, PPQ, TPS, msToTicks, chordName};
 })();
 if (typeof module !== 'undefined') module.exports = PGM;
