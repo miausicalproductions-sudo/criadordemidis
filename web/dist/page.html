@@ -135,9 +135,13 @@ input[type=range]{width:100%;accent-color:var(--accent)}
           <div class="sl"><label for="lhD">Notas da mão esquerda</label><input type="range" id="lhD" min="0.10" max="0.60" step="0.02" value="0.28"><output id="lhDo"></output></div>
           <div class="sl"><label for="rhD">Ataques da mão direita</label><input type="range" id="rhD" min="0.10" max="0.60" step="0.02" value="0.22"><output id="rhDo"></output></div>
           <div class="sl"><label for="human">Humanização (0 = grade exata)</label><input type="range" id="human" min="0" max="2" step="0.05" value="1"><output id="humanO"></output></div>
-          <div class="sl"><label for="strum">Rolagem do acorde (ms)</label><input type="range" id="strum" min="0" max="90" step="1" value="28"><output id="strumO"></output></div>
+          <div class="sl"><label for="strum">Rolagem do acorde (ms)</label><input type="range" id="strum" min="0" max="120" step="1" value="45"><output id="strumO"></output></div>
+          <div class="sl"><label for="strumP">Acordes que rolam (%)</label><input type="range" id="strumP" min="0" max="100" step="5" value="55"><output id="strumPO"></output></div>
           <div><label for="strumDir">Direção da rolagem</label>
-            <select id="strumDir"><option value="up">Do grave ao agudo</option><option value="down">Do agudo ao grave</option><option value="mix" selected>Variada</option></select></div>
+            <select id="strumDir"><option value="up">Do grave ao agudo</option><option value="down">Do agudo ao grave</option><option value="mix" selected>Variada (mais do agudo ao grave)</option></select></div>
+          <div class="sl"><label for="lead">Melodia à frente do acompanhamento (ms)</label><input type="range" id="lead" min="0" max="40" step="1" value="14"><output id="leadO"></output></div>
+          <div class="sl"><label for="rubato">Respiração do andamento (ms)</label><input type="range" id="rubato" min="0" max="30" step="1" value="10"><output id="rubatoO"></output></div>
+          <div class="sl"><label for="contrast">Contraste melodia / acompanhamento</label><input type="range" id="contrast" min="0" max="2" step="0.05" value="1"><output id="contrastO"></output></div>
           <div class="sl"><label for="tsd">Soltura do timing (ms)</label><input type="range" id="tsd" min="0" max="15" step="0.5" value="6"><output id="tsdO"></output></div>
           <label class="chk"><input type="checkbox" id="pedal" checked> Pedal de sustain (CC64)</label>
         </div>
@@ -481,46 +485,74 @@ function generate(o){
   return {notes, segs, total};
 }
 
-/* ---------- Humanização ---------- */
+/* ---------- Humanização v2 ----------
+   Desvios correlacionados e com intenção, sempre medidos a partir da grade exata:
+   - rubato lento compartilhado por todas as linhas + respiro no fim de cada frase de 4 compassos
+   - ruído por tempo compartilhado entre as mãos (+ um pouco individual por nota)
+   - melodia à frente do acompanhamento
+   - rolagem do acorde só em parte dos acordes, com intervalos irregulares e direção variável
+   - velocity por papel (melodia > topo do acorde > notas internas), arco por frase, acento na troca de acorde
+   - durações por linha (melodia ligada, mão direita mais curta), sem notas presas no mesmo pitch
+   - pedal com meio-pedal (profundidade variável) */
 const msToTicks = (ms, bpm) => ms * bpm * PPQ / 60000;
 const accent = s => s === 0 ? 9 : s === 8 ? 5 : s % 4 === 0 ? 2 : s % 2 === 0 ? -1 : -4;
+const HUMAN_DEFAULTS = {strumMs: 45, strumProb: 0.55, strumDir: 'mix', lead: 14, rubato: 10, contrast: 1, timingSd: 6, timingMax: 22, velJitter: 4, pedal: true};
 function humanize(notes, segs, bpm, total, seed, cfg){
-  const A = cfg.amount, rng = makeRng(seed * 7919 + 13), events = [], groups = new Map();
-  const velBase = {lh: 54, rh: 62, solo: 84};
+  const c = {...HUMAN_DEFAULTS}; for (const k in cfg) if (cfg[k] !== undefined) c[k] = cfg[k];
+  const A = c.amount, rng = makeRng(seed * 7919 + 13), events = [], groups = new Map();
+  const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+  const flat = {lh: 54, rh: 62, solo: 84};
+  const base = {lh: 50, rh: 56, solo: 56 + 22 * c.contrast};
+  const segStarts = new Set(segs.map(s => s.start));
+  const ph1 = rng() * 2 * Math.PI, ph2 = rng() * 2 * Math.PI;
+  const drift = t => c.rubato * A * (0.6 * Math.sin(2 * Math.PI * t / (4.7 * 4) + ph1) + 0.4 * Math.sin(2 * Math.PI * t / (11.3 * 4) + ph2));
+  const ritard = t => { const bar = Math.floor(t / 16), s = t % 16; return (bar % 4 === 3 && s >= 12) ? c.rubato * A * 0.9 * (s - 11) / 4 : 0; };
+  const beatNoise = Array.from({length: Math.ceil(total / 4) + 2}, () => rng.gauss(0, 0.6 * c.timingSd) * A);
   for (const n of notes){ const k = n.track + ':' + n.group; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(n); }
-  for (const [k, ns] of groups){
+  for (const [, ns] of groups){
     const trk = ns[0].track; ns.sort((a, b) => a.pitch - b.pitch);
-    let off = rng.gauss(0, cfg.timingSd) * A;
-    if (trk === 'lh') off -= 4 * A; if (trk === 'solo') off += 8 * A;
-    // rolagem do acorde: cada nota entra num instante diferente, com intervalos irregulares
-    const nn = ns.length, dirDown = cfg.strumDir === 'down' || (cfg.strumDir === 'mix' && rng() < 0.3);
+    const nn = ns.length;
+    // rolagem: só parte dos acordes rola forte; os outros ficam quase juntos
+    const rolled = rng() < c.strumProb;
+    const dirDown = c.strumDir === 'down' || (c.strumDir === 'mix' && rng() < 0.55);
     const order = ns.map((_, i) => i); if (dirDown) order.reverse();
-    const total = nn < 2 ? 0 : (cfg.strumMs ?? 28) * A * rng.uniform(0.6, 1.0) * Math.min(1, (nn - 1) / 3);
+    const span = nn < 2 ? 0 : c.strumMs * A * (rolled ? rng.uniform(0.6, 1.3) : rng.uniform(0, 0.25)) * Math.min(1, (nn - 1) / 3);
     const gaps = order.slice(1).map(() => rng.uniform(0.5, 1.5)), gs = gaps.reduce((a, b) => a + b, 0) || 1;
-    const delay = new Array(nn).fill(0); let acc = 0;
-    order.forEach((idx, k) => { if (k > 0) acc += total * gaps[k - 1] / gs; delay[idx] = acc; });
+    const delay = new Array(nn).fill(0), rank = new Array(nn).fill(0); let acc = 0;
+    order.forEach((idx, k) => { if (k > 0) acc += span * gaps[k - 1] / gs; delay[idx] = acc; rank[idx] = nn > 1 ? 1 - 2 * k / (nn - 1) : 0; });
+    const roleOff = (trk === 'lh' ? 0 : trk === 'rh' ? -c.lead * 0.5 : -c.lead) * A;
+    const gBeat = beatNoise[Math.floor(ns[0].start / 4)];
     ns.forEach((n, i) => {
-      const sib = delay[i];
-      const o = Math.max(-cfg.timingMax, Math.min(cfg.timingMax, off + rng.gauss(0, 1.2) * A)) + sib;
-      const on = n.start * TPS + msToTicks(o, bpm), sb = Math.floor(n.start) % 16;
-      const contour = 6 * Math.sin(2 * Math.PI * (n.start / 64));
-      let v = velBase[trk] + A * (accent(sb) + contour);
-      if (n.role === 'top') v += 4 * A; else if (n.role === 'inner' && trk === 'rh') v -= 3 * A; else if (n.role === 'bass') v += 3 * A;
-      if (trk === 'solo'){ v += (n.pitch - 76) * 0.5 * A; v += Math.min(8, n.dur) * 0.6 * A; }
-      v += rng.gauss(0, cfg.velJitter) * A; if (A === 0) v = velBase[trk];
-      v = Math.max(18, Math.min(121, Math.round(v)));
-      const lg = A === 0 ? 1 : rng.uniform(0.88, 1.0);
-      let offT = (n.start + n.dur * lg) * TPS + msToTicks(rng.gauss(0, cfg.timingSd * 0.7) * A, bpm);
+      const noise = clamp(rng.gauss(0, 0.5 * c.timingSd) * A, -c.timingMax, c.timingMax);
+      const onMs = drift(n.start) + ritard(n.start) + gBeat + roleOff + noise + delay[i];
+      const on = n.start * TPS + msToTicks(onMs, bpm);
+      // velocity
+      const st = Math.floor(n.start), sb = st % 16;
+      let add = accent(sb) + 6 * Math.sin(2 * Math.PI * n.start / 64) + (segStarts.has(st) ? 5 : 0) + 3 * rank[i] * (span > 8 ? 1 : 0);
+      if (trk === 'solo'){ const fr = (n.start % 32) / 32; add += 9 * (2 * Math.sin(Math.PI * (0.15 + 0.7 * fr)) - 1) + (n.pitch - 76) * 0.5 + Math.min(8, n.dur) * 0.6; }
+      if (n.role === 'top') add += 7 * c.contrast; else if (n.role === 'inner' && trk === 'rh') add -= 5 * c.contrast; else if (n.role === 'bass') add += 4;
+      let v = base[trk] + A * add + rng.gauss(0, c.velJitter * 0.8) * A;
+      if (A === 0) v = flat[trk];
+      v = Math.round(clamp(v, 18, 122));
+      // duração por linha
+      const lgr = trk === 'solo' ? [0.98, 1.12] : trk === 'rh' ? [0.78, 0.96] : [0.95, 1.04];
+      const lg = A === 0 ? 1 : 1 + (rng.uniform(lgr[0], lgr[1]) - 1) * A;
+      let offT = (n.start + n.dur * lg) * TPS + msToTicks(rng.gauss(0, c.timingSd * 0.6) * A, bpm);
       offT = Math.max(offT, on + msToTicks(45, bpm));
       events.push({on: Math.round(Math.max(0, on)), off: Math.round(offT), pitch: n.pitch, vel: v, track: trk});
     });
   }
+  // nunca deixa a mesma nota ligada por cima da repetição dela mesma
+  const byKey = new Map();
+  for (const e of events){ const k = e.track + ':' + e.pitch; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(e); }
+  for (const list of byKey.values()){ list.sort((a, b) => a.on - b.on); for (let i = 0; i + 1 < list.length; i++) if (list[i].off > list[i + 1].on - 2) list[i].off = Math.max(list[i].on + 1, list[i + 1].on - 2); }
   const pedal = [];
-  if (cfg.pedal){
+  if (c.pedal){
     const marks = new Set(segs.map(s => s.start)); for (let b = 0; b < Math.floor(total / 16); b++) marks.add(b * 16);
+    const depth = () => Math.round(127 - A * rng.uniform(0, 38));
     for (const m of [...marks].sort((a, b) => a - b)){
       const t0 = m * TPS, up = t0 + msToTicks(rng.uniform(12, 30) * A + 8, bpm), dn = up + msToTicks(rng.uniform(35, 70) * A + 20, bpm);
-      pedal.push([Math.round(up), 0], [Math.round(dn), 127]);
+      pedal.push([Math.round(up), Math.round(rng.uniform(0, 26) * A)], [Math.round(dn), depth()]);
     }
     pedal.unshift([0, 127]); pedal.push([total * TPS + 10, 0]);
   }
@@ -605,11 +637,11 @@ function params(){
   return {prog: $('prog').value, key: keySel.value, bpm: Math.min(220, Math.max(40, num('bpm', 106.4))), repeats: parseInt($('repeats').value, 10),
     seed: Math.max(1, Math.floor(num('seed', 1))), rhythm: $('rhythm').value, solo: $('solo').checked,
     soloStartBar: Math.max(0, Math.floor(num('soloStart', 3)) - 1), lhDensity: num('lhD', .28), rhDensity: num('rhD', .22),
-    human: num('human', 1), timingSd: num('tsd', 6), strumMs: num('strum', 28), strumDir: $('strumDir').value, pedal: $('pedal').checked};
+    human: num('human', 1), timingSd: num('tsd', 6), strumMs: num('strum', 45), strumProb: num('strumP', 55) / 100, strumDir: $('strumDir').value, lead: num('lead', 14), rubato: num('rubato', 10), contrast: num('contrast', 1), pedal: $('pedal').checked};
 }
 function syncOutputs(){
   $('lhDo').textContent = num('lhD', 0).toFixed(2); $('rhDo').textContent = num('rhD', 0).toFixed(2);
-  $('humanO').textContent = num('human', 0).toFixed(2); $('tsdO').textContent = num('tsd', 0).toFixed(1); $('strumO').textContent = Math.round(num('strum', 0));
+  $('humanO').textContent = num('human', 0).toFixed(2); $('tsdO').textContent = num('tsd', 0).toFixed(1); $('strumO').textContent = Math.round(num('strum', 0)); $('strumPO').textContent = Math.round(num('strumP', 0)) + '%'; $('leadO').textContent = Math.round(num('lead', 0)); $('rubatoO').textContent = Math.round(num('rubato', 0)); $('contrastO').textContent = num('contrast', 0).toFixed(2);
 }
 
 /* ---------- geração ---------- */
@@ -620,7 +652,7 @@ function regenerate(){
   try {
     const prof = PGM.aggregateProfile(S.refs);
     const g = PGM.generate({...p, profile: p.rhythm === 'learned' ? prof : null});
-    const mk = amt => PGM.humanize(g.notes, g.segs, p.bpm, g.total, p.seed, {amount: amt, timingSd: p.timingSd, timingMax: 22, velJitter: 4, strumMs: p.strumMs, strumDir: p.strumDir, pedal: p.pedal});
+    const mk = amt => PGM.humanize(g.notes, g.segs, p.bpm, g.total, p.seed, {amount: amt, timingSd: p.timingSd, timingMax: 22, velJitter: 4, strumMs: p.strumMs, strumProb: p.strumProb, strumDir: p.strumDir, lead: p.lead, rubato: p.rubato, contrast: p.contrast, pedal: p.pedal});
     S.result = {g, p, human: mk(p.human), grid: mk(0), prof};
     $('progErr').hidden = true;
     renderChips(p);
@@ -771,7 +803,8 @@ function loadRecipe(o){
   $('prog').value = o.prog; keySel.value = o.key; $('bpm').value = o.bpm; $('repeats').value = String(o.repeats); $('seed').value = o.seed;
   $('rhythm').value = o.rhythm; $('solo').checked = !!o.solo; $('soloStart').value = (o.soloStartBar || 0) + 1;
   $('lhD').value = o.lhDensity; $('rhD').value = o.rhDensity; $('human').value = o.human; $('tsd').value = o.timingSd; $('pedal').checked = !!o.pedal;
-  $('strum').value = o.strumMs ?? 28; $('strumDir').value = o.strumDir || 'mix';
+  $('strum').value = o.strumMs ?? 45; $('strumP').value = Math.round((o.strumProb ?? 0.55) * 100); $('strumDir').value = o.strumDir || 'mix';
+  $('lead').value = o.lead ?? 14; $('rubato').value = o.rubato ?? 10; $('contrast').value = o.contrast ?? 1;
   if (o.profile && o.profile.low && !S.refs.length){
     S.refs.push({name: 'perfil da receita', fromRecipe: true, nNotes: null, bars: o.profile.bars, bpm: o.bpm, key: o.key, chords: [],
       low: o.profile.low.map(x => x * o.profile.bars), high: o.profile.high.map(x => x * o.profile.bars)}); saveRefs();
@@ -799,7 +832,7 @@ function buildFiles(){
 let deb = 0; const later = () => { clearTimeout(deb); deb = setTimeout(regenerate, 220); };
 $('prog').addEventListener('input', later);
 for (const id of ['key', 'bpm', 'repeats', 'seed', 'rhythm', 'solo', 'soloStart', 'pedal', 'strumDir']) $(id).addEventListener('input', later);
-for (const id of ['lhD', 'rhD', 'human', 'tsd', 'strum']) $(id).addEventListener('input', () => { syncOutputs(); later(); });
+for (const id of ['lhD', 'rhD', 'human', 'tsd', 'strum', 'strumP', 'lead', 'rubato', 'contrast']) $(id).addEventListener('input', () => { syncOutputs(); later(); });
 $('gen').onclick = () => { $('seed').value = 1 + Math.floor(Math.random() * 99999); regenerate(); };
 $('play').onclick = () => S.play ? stopPlay() : startPlay();
 document.querySelectorAll('input[name=listen]').forEach(r => r.addEventListener('change', () => { S.listen = r.value; if (S.play){ stopPlay(); startPlay(); } else draw(); }));
