@@ -435,13 +435,17 @@ function recipe(){
   return {app: 'gerador-piano-midi', version: 1, ...p, profile: prof};
 }
 function loadRecipe(o){
-  if (!o || o.app !== 'gerador-piano-midi') throw new Error('Esse JSON não é uma receita deste gerador.');
-  $('prog').value = o.prog; $('useSec').checked = !!(o.sections && o.sections.length); if (o.sections && o.sections.length) setSections(o.sections); keySel.value = o.key; $('bpm').value = o.bpm; $('repeats').value = String(o.repeats); $('seed').value = o.seed;
-  $('rhythm').value = o.rhythm; $('solo').checked = !!o.solo; $('soloStart').value = (o.soloStartBar || 0) + 1;
-  $('lhD').value = o.lhDensity; $('rhD').value = o.rhDensity; $('human').value = o.human; $('tsd').value = o.timingSd; $('pedal').checked = !!o.pedal;
-  $('strum').value = o.strumMs ?? 36; $('strumP').value = Math.round((o.strumProb ?? 0.8) * 100); $('strumDir').value = o.strumDir || 'mix';
-  $('texture').value = o.texture || 'driving'; $('intensity').value = o.intensity ?? 1;
-  $('lead').value = o.lead ?? 12; $('rubato').value = o.rubato ?? 10; $('contrast').value = o.contrast ?? 1;
+  if (!o || o.app !== 'gerador-piano-midi') throw new Error('Esse JSON não é uma receita deste gerador (falta "app": "gerador-piano-midi").');
+  const set = (id, v) => { if (v !== undefined && v !== null) $(id).value = String(v); };
+  const hasSec = !!(o.sections && o.sections.length);
+  if (!hasSec && !o.prog) throw new Error('A receita precisa ter "sections" ou "prog".');
+  set('prog', o.prog); $('useSec').checked = hasSec; if (hasSec) setSections(o.sections.map(x => ({name: x.name || 'Seção', prog: x.prog, reps: x.reps || 1, emo: x.emo || 'balada', int: x.int ?? 55, solo: x.solo !== false})));
+  if (o.key){ const FL = {Db: 'C#', Eb: 'D#', Gb: 'F#', Ab: 'G#', Bb: 'A#'}, m = /^([A-G][#b]?)(m?)$/.exec(String(o.key).trim()); if (m) keySel.value = (FL[m[1]] || m[1]) + m[2]; }
+  set('bpm', o.bpm); set('repeats', o.repeats); set('seed', o.seed); set('rhythm', o.rhythm);
+  if (o.solo !== undefined) $('solo').checked = !!o.solo; if (o.soloStartBar !== undefined) $('soloStart').value = o.soloStartBar + 1;
+  set('lhD', o.lhDensity); set('rhD', o.rhDensity); set('human', o.human); set('tsd', o.timingSd); if (o.pedal !== undefined) $('pedal').checked = !!o.pedal;
+  set('strum', o.strumMs); if (o.strumProb !== undefined) $('strumP').value = Math.round(o.strumProb * 100); set('strumDir', o.strumDir);
+  set('texture', o.texture); set('intensity', o.intensity); set('lead', o.lead); set('rubato', o.rubato); set('contrast', o.contrast);
   if (o.profile && o.profile.low && !S.refs.length){
     S.refs.push({name: 'perfil da receita', fromRecipe: true, nNotes: null, bars: o.profile.bars, bpm: o.bpm, key: o.key, chords: [],
       low: o.profile.low.map(x => x * o.profile.bars), high: o.profile.high.map(x => x * o.profile.bars)}); saveRefs();

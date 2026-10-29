@@ -2,7 +2,7 @@
 /* ===== Motor: teoria, análise de MIDIs, geração, humanização, exportação ===== */
 const PGM = (() => {
 const NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const FLAT = {Db:'C#',Eb:'D#',Gb:'F#',Ab:'G#',Bb:'A#'};
+const FLAT = {Db:'C#',Eb:'D#',Gb:'F#',Ab:'G#',Bb:'A#',Cb:'B',Fb:'E','E#':'F','B#':'C'};
 const QUAL = {'':[0,4,7], m:[0,3,7], '7':[0,4,7,10], maj7:[0,4,7,11], m7:[0,3,7,10], sus4:[0,5,7], sus2:[0,2,7],
   maj9:[0,4,7,11,14], m9:[0,3,7,10,14], '9':[0,4,7,10,14], add9:[0,4,7,14], '6':[0,4,7,9], m6:[0,3,7,9], dim:[0,3,6], m7b5:[0,3,6,10], aug:[0,4,8]};
 const isMin = q => /^m(?!aj)/.test(q);
