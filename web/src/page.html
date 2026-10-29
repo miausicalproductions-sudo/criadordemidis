@@ -121,11 +121,12 @@ input[type=range]{width:100%;accent-color:var(--accent)}
         <label for="cifraTxt">Cole a cifra de uma música (Cifra Club ou parecido), com os acordes em cima da letra e as partes entre colchetes</label>
         <textarea id="cifraTxt" rows="7" spellcheck="false" placeholder="[Intro] E B C#m7 A7M&#10;&#10;[Verso 1]&#10;E          B&#10;Letra da música aqui&#10;C#m7       A7M&#10;mais um pedaço da letra&#10;&#10;[Refrão]&#10;E | B | C#m7 | A7M"></textarea>
         <div class="row" style="margin-top:10px">
-          <div><label for="cifBeats">Cada acorde dura</label><select id="cifBeats"><option value="4" selected>1 compasso</option><option value="2">meio compasso</option><option value="8">2 compassos</option></select></div>
+          <div><label for="cifBpm">Andamento (BPM)</label><input type="number" id="cifBpm" value="106.4" min="40" max="220" step="0.1" style="width:96px"></div>
+          <div><label for="cifBeats">Cada acorde dura</label><select id="cifBeats"><option value="0" selected>Automático pela letra (estimado)</option><option value="4">1 compasso</option><option value="2">meio compasso</option><option value="8">2 compassos</option></select></div>
           <button type="button" class="primary" id="cifraGo">Ler cifra</button>
         </div>
         <p class="hint" id="cifraOut" style="margin:8px 0 0"></p>
-        <p class="hint">Cada parte vira uma seção, com emoção sugerida pelo nome (Verso calmo, Pré-Refrão crescendo, Refrão forte). Use barras para dividir o compasso: <span style="font-family:var(--mono)">E | B C#m | A</span>. A cifra não traz andamento: ajuste o BPM.</p>
+        <p class="hint">Cada parte vira uma seção, com emoção sugerida pelo nome (Verso calmo, Pré-Refrão crescendo, Refrão forte). No modo automático, a duração de cada acorde é estimada pelo tamanho da parte da letra que está embaixo dele e pelo BPM; é um palpite, então ouça e corrija na progressão de cada seção. Barras também funcionam: <span style="font-family:var(--mono)">E | B C#m | A</span>.</p>
       </section>
 
       <section class="card" aria-labelledby="h-gui">
@@ -302,9 +303,12 @@ function readSections(){
   return [...document.querySelectorAll('#secList .sec')].map(d => ({name: d.querySelector('.sn').value, prog: d.querySelector('.sp').value, emo: d.querySelector('.se').value,
     reps: parseInt(d.querySelector('.sr').value, 10), int: parseInt(d.querySelector('.si').value, 10), solo: d.querySelector('.ss').checked, lyric: d.dataset.lyric || ''}));
 }
+$('cifBpm').addEventListener('input', () => { $('bpm').value = $('cifBpm').value; later(); });
+$('bpm').addEventListener('input', () => { $('cifBpm').value = $('bpm').value; });
 $('cifraGo').onclick = () => {
   try {
-    const r = PGM.parseCifra($('cifraTxt').value, parseInt($('cifBeats').value, 10));
+    const bpm = Math.min(220, Math.max(40, num('cifBpm', 100))); $('bpm').value = bpm;
+    const r = PGM.parseCifra($('cifraTxt').value, parseInt($('cifBeats').value, 10), bpm);
     setSections(r.sections); $('useSec').checked = true; keySel.value = r.key; regenerate();
     $('cifraOut').textContent = r.sections.length + ' parte(s), ' + r.nChords + ' acordes, tom provável ' + r.key + (r.warnings.length ? ' · ' + r.warnings.join('; ') : '') + '. Confira o tom e o andamento, e as seções logo abaixo.';
     toast('Cifra lida: ' + r.sections.length + ' seções montadas.');

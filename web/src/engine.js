@@ -518,11 +518,25 @@ function keyFromChords(names, weights){
   }
   return best;
 }
-function parseCifra(text, beatsPerChord = 4){
-  const secs = [], warn = []; let cur = null;
+const sylCount = t => (String(t).toLowerCase().match(/[aeiouáéíóúâêôãõàü]+/g) || []).length;
+/* Duração pela letra: cada acorde ganha a parte da frase cantada em cima dele. A frase vira compassos inteiros
+   conforme a velocidade de fala (sílabas por segundo) e o BPM; cada acorde recebe múltiplos de 2 batidas. */
+function lyricBeats(items, lyric, bpm, sylPerSec = 3.5){
+  const n = items.length, cols = items.map(i => i.col), syl = items.map((_, i) => sylCount(lyric.slice(i === 0 ? 0 : cols[i], i + 1 < n ? cols[i + 1] : undefined)));
+  const S = syl.reduce((a, b) => a + b, 0); if (!S) return null;
+  const spb = sylPerSec * 240 / bpm;                                     // sílabas por compasso
+  let total = 4 * Math.max(1, Math.round(S / spb)); if (total < 2 * n) total = Math.ceil(2 * n / 4) * 4;
+  const b = syl.map(x => Math.max(2, 2 * Math.round(total * x / S / 2)));
+  let sum = b.reduce((x, y) => x + y, 0), guard = 40;
+  while (sum !== total && guard--){ const i = sum > total ? b.indexOf(Math.max(...b)) : b.indexOf(Math.max(...syl.map((x, k) => syl[k] === Math.max(...syl) ? b[k] : 0))); if (sum > total){ if (b[i] <= 2) break; b[i] -= 2; sum -= 2; } else { b[i] += 2; sum += 2; } }
+  return b;
+}
+function parseCifra(text, beatsPerChord = 4, bpm = 100){
+  const secs = [], warn = []; let cur = null, pend = null;
+  const flush = () => { if (pend){ for (const it of pend.items) if (it.o.b == null) it.o.b = beatsPerChord > 0 ? beatsPerChord : 4; pend = null; } };
   const EMO = [[/intro/i, 'sussurro', 30, false], [/pr[eé]/i, 'crescendo', 50, true], [/refr|chorus|coro/i, 'climax', 80, true], [/ponte|bridge/i, 'crescendo', 55, true],
     [/final|outro|coda|fim/i, 'sussurro', 30, false], [/solo|instrum|interl/i, 'balada', 55, true], [/verso|estrofe|verse|parte/i, 'sussurro', 38, false]];
-  const open = name => { const e = EMO.find(x => x[0].test(name)) || [null, 'balada', 50, true]; cur = {name, chords: [], lyric: '', emo: e[1], int: e[2], solo: e[3]}; secs.push(cur); };
+  const open = name => { flush(); const e = EMO.find(x => x[0].test(name)) || [null, 'balada', 50, true]; cur = {name, chords: [], lyric: '', emo: e[1], int: e[2], solo: e[3]}; secs.push(cur); };
   const isHeading = l => /^\s*\[[^\]]+\]\s*$/.test(l) || /^\s*(intro|verso|estrofe|pr[eé][- ]?refr|refr|ponte|solo|final|outro|coda|bridge|chorus|verse|interl|parte)[^\n]{0,24}:?\s*$/i.test(l) && !/[a-záéíóúãõç]{4,}\s+[a-záéíóúãõç]{3,}\s+[a-záéíóúãõç]{3,}/i.test(l);
   const lines = []; for (const l of String(text).replace(/\r/g, '').split('\n')){ const m = /^\s*(\[[^\]]+\])\s*(\S.*)$/.exec(l); if (m){ lines.push(m[1]); lines.push(m[2]); } else lines.push(l); }
   for (const raw of lines){
@@ -539,22 +553,30 @@ function parseCifra(text, beatsPerChord = 4){
       // barras "|" separam compassos: acordes entre duas barras dividem o compasso
       if (toks.includes('|')){
         let bar = [];
-        const flush = () => { if (bar.length){ for (const c of bar) cur.chords.push([c, 4 / bar.length]); bar = []; } };
-        for (const t of toks){ if (t === '|' || t === '||') flush(); else if (!CIF_FILL.test(t)) bar.push(normChord(t)); }
-        flush();
-      } else for (const c of chords) cur.chords.push([c, beatsPerChord]);
+        const flushBar = () => { if (bar.length){ for (const c of bar) cur.chords.push({c, b: 4 / bar.length}); bar = []; } };
+        for (const t of toks){ if (t === '|' || t === '||') flushBar(); else if (!CIF_FILL.test(t)) bar.push(normChord(t)); }
+        flushBar();
+      } else {
+        flush(); const cols = []; raw.replace(/\S+/g, (t, i) => { if (!CIF_FILL.test(t.replace(/[\[\]]/g, ''))) cols.push(i); return t; });
+        pend = {items: chords.map((c, i) => { const o = {c, b: beatsPerChord > 0 ? null : null}; cur.chords.push(o); return {o, col: cols[i] ?? 0}; })};
+      }
       continue;
     }
     const bad = chordToks.filter((t, i) => !chords[i]);
     if (bad.length && bad.length === chordToks.length && toks.length <= 3 && /^[A-G]/.test(toks[0]) && !/[a-z]{3,}/.test(line)) warn.push('Acorde não reconhecido: ' + bad.join(' '));
+    if (pend && beatsPerChord <= 0){
+      const lb = lyricBeats(pend.items, raw.replace(/\t/g, '    '), bpm);
+      if (lb) pend.items.forEach((it, i) => { it.o.b = lb[i]; }); pend = null;
+    } else if (pend) flush();
     if (cur && !cur.lyric) cur.lyric = line.slice(0, 80);
   }
+  flush();
   const keep = secs.filter(x => x.chords.length);
   if (!keep.length) throw new Error('Não achei acordes nesse texto. Cole a cifra com os acordes em linhas próprias (como no Cifra Club).');
-  const all = keep.flatMap(x => x.chords);
+  const all = keep.flatMap(x => x.chords.map(o => [o.c, o.b]));
   const key = keyFromChords(all.map(c => c[0]), all.map(c => c[1]));
   const sections = keep.map(x => {
-    const merged = []; for (const [c, b] of x.chords){ if (merged.length && merged[merged.length - 1][0] === c) merged[merged.length - 1][1] += b; else merged.push([c, b]); }
+    const merged = []; for (const {c, b} of x.chords){ if (merged.length && merged[merged.length - 1][0] === c) merged[merged.length - 1][1] += b; else merged.push([c, b]); }
     return {name: x.name, prog: merged.map(([c, b]) => c + ':' + b).join(' '), reps: 1, emo: x.emo, int: x.int, solo: x.solo, lyric: x.lyric};
   });
   return {sections, key, nChords: all.length, warnings: [...new Set(warn)]};

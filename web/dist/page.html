@@ -121,11 +121,12 @@ input[type=range]{width:100%;accent-color:var(--accent)}
         <label for="cifraTxt">Cole a cifra de uma música (Cifra Club ou parecido), com os acordes em cima da letra e as partes entre colchetes</label>
         <textarea id="cifraTxt" rows="7" spellcheck="false" placeholder="[Intro] E B C#m7 A7M&#10;&#10;[Verso 1]&#10;E          B&#10;Letra da música aqui&#10;C#m7       A7M&#10;mais um pedaço da letra&#10;&#10;[Refrão]&#10;E | B | C#m7 | A7M"></textarea>
         <div class="row" style="margin-top:10px">
-          <div><label for="cifBeats">Cada acorde dura</label><select id="cifBeats"><option value="4" selected>1 compasso</option><option value="2">meio compasso</option><option value="8">2 compassos</option></select></div>
+          <div><label for="cifBpm">Andamento (BPM)</label><input type="number" id="cifBpm" value="106.4" min="40" max="220" step="0.1" style="width:96px"></div>
+          <div><label for="cifBeats">Cada acorde dura</label><select id="cifBeats"><option value="0" selected>Automático pela letra (estimado)</option><option value="4">1 compasso</option><option value="2">meio compasso</option><option value="8">2 compassos</option></select></div>
           <button type="button" class="primary" id="cifraGo">Ler cifra</button>
         </div>
         <p class="hint" id="cifraOut" style="margin:8px 0 0"></p>
-        <p class="hint">Cada parte vira uma seção, com emoção sugerida pelo nome (Verso calmo, Pré-Refrão crescendo, Refrão forte). Use barras para dividir o compasso: <span style="font-family:var(--mono)">E | B C#m | A</span>. A cifra não traz andamento: ajuste o BPM.</p>
+        <p class="hint">Cada parte vira uma seção, com emoção sugerida pelo nome (Verso calmo, Pré-Refrão crescendo, Refrão forte). No modo automático, a duração de cada acorde é estimada pelo tamanho da parte da letra que está embaixo dele e pelo BPM; é um palpite, então ouça e corrija na progressão de cada seção. Barras também funcionam: <span style="font-family:var(--mono)">E | B C#m | A</span>.</p>
       </section>
 
       <section class="card" aria-labelledby="h-gui">
@@ -778,11 +779,25 @@ function keyFromChords(names, weights){
   }
   return best;
 }
-function parseCifra(text, beatsPerChord = 4){
-  const secs = [], warn = []; let cur = null;
+const sylCount = t => (String(t).toLowerCase().match(/[aeiouáéíóúâêôãõàü]+/g) || []).length;
+/* Duração pela letra: cada acorde ganha a parte da frase cantada em cima dele. A frase vira compassos inteiros
+   conforme a velocidade de fala (sílabas por segundo) e o BPM; cada acorde recebe múltiplos de 2 batidas. */
+function lyricBeats(items, lyric, bpm, sylPerSec = 3.5){
+  const n = items.length, cols = items.map(i => i.col), syl = items.map((_, i) => sylCount(lyric.slice(i === 0 ? 0 : cols[i], i + 1 < n ? cols[i + 1] : undefined)));
+  const S = syl.reduce((a, b) => a + b, 0); if (!S) return null;
+  const spb = sylPerSec * 240 / bpm;                                     // sílabas por compasso
+  let total = 4 * Math.max(1, Math.round(S / spb)); if (total < 2 * n) total = Math.ceil(2 * n / 4) * 4;
+  const b = syl.map(x => Math.max(2, 2 * Math.round(total * x / S / 2)));
+  let sum = b.reduce((x, y) => x + y, 0), guard = 40;
+  while (sum !== total && guard--){ const i = sum > total ? b.indexOf(Math.max(...b)) : b.indexOf(Math.max(...syl.map((x, k) => syl[k] === Math.max(...syl) ? b[k] : 0))); if (sum > total){ if (b[i] <= 2) break; b[i] -= 2; sum -= 2; } else { b[i] += 2; sum += 2; } }
+  return b;
+}
+function parseCifra(text, beatsPerChord = 4, bpm = 100){
+  const secs = [], warn = []; let cur = null, pend = null;
+  const flush = () => { if (pend){ for (const it of pend.items) if (it.o.b == null) it.o.b = beatsPerChord > 0 ? beatsPerChord : 4; pend = null; } };
   const EMO = [[/intro/i, 'sussurro', 30, false], [/pr[eé]/i, 'crescendo', 50, true], [/refr|chorus|coro/i, 'climax', 80, true], [/ponte|bridge/i, 'crescendo', 55, true],
     [/final|outro|coda|fim/i, 'sussurro', 30, false], [/solo|instrum|interl/i, 'balada', 55, true], [/verso|estrofe|verse|parte/i, 'sussurro', 38, false]];
-  const open = name => { const e = EMO.find(x => x[0].test(name)) || [null, 'balada', 50, true]; cur = {name, chords: [], lyric: '', emo: e[1], int: e[2], solo: e[3]}; secs.push(cur); };
+  const open = name => { flush(); const e = EMO.find(x => x[0].test(name)) || [null, 'balada', 50, true]; cur = {name, chords: [], lyric: '', emo: e[1], int: e[2], solo: e[3]}; secs.push(cur); };
   const isHeading = l => /^\s*\[[^\]]+\]\s*$/.test(l) || /^\s*(intro|verso|estrofe|pr[eé][- ]?refr|refr|ponte|solo|final|outro|coda|bridge|chorus|verse|interl|parte)[^\n]{0,24}:?\s*$/i.test(l) && !/[a-záéíóúãõç]{4,}\s+[a-záéíóúãõç]{3,}\s+[a-záéíóúãõç]{3,}/i.test(l);
   const lines = []; for (const l of String(text).replace(/\r/g, '').split('\n')){ const m = /^\s*(\[[^\]]+\])\s*(\S.*)$/.exec(l); if (m){ lines.push(m[1]); lines.push(m[2]); } else lines.push(l); }
   for (const raw of lines){
@@ -799,22 +814,30 @@ function parseCifra(text, beatsPerChord = 4){
       // barras "|" separam compassos: acordes entre duas barras dividem o compasso
       if (toks.includes('|')){
         let bar = [];
-        const flush = () => { if (bar.length){ for (const c of bar) cur.chords.push([c, 4 / bar.length]); bar = []; } };
-        for (const t of toks){ if (t === '|' || t === '||') flush(); else if (!CIF_FILL.test(t)) bar.push(normChord(t)); }
-        flush();
-      } else for (const c of chords) cur.chords.push([c, beatsPerChord]);
+        const flushBar = () => { if (bar.length){ for (const c of bar) cur.chords.push({c, b: 4 / bar.length}); bar = []; } };
+        for (const t of toks){ if (t === '|' || t === '||') flushBar(); else if (!CIF_FILL.test(t)) bar.push(normChord(t)); }
+        flushBar();
+      } else {
+        flush(); const cols = []; raw.replace(/\S+/g, (t, i) => { if (!CIF_FILL.test(t.replace(/[\[\]]/g, ''))) cols.push(i); return t; });
+        pend = {items: chords.map((c, i) => { const o = {c, b: beatsPerChord > 0 ? null : null}; cur.chords.push(o); return {o, col: cols[i] ?? 0}; })};
+      }
       continue;
     }
     const bad = chordToks.filter((t, i) => !chords[i]);
     if (bad.length && bad.length === chordToks.length && toks.length <= 3 && /^[A-G]/.test(toks[0]) && !/[a-z]{3,}/.test(line)) warn.push('Acorde não reconhecido: ' + bad.join(' '));
+    if (pend && beatsPerChord <= 0){
+      const lb = lyricBeats(pend.items, raw.replace(/\t/g, '    '), bpm);
+      if (lb) pend.items.forEach((it, i) => { it.o.b = lb[i]; }); pend = null;
+    } else if (pend) flush();
     if (cur && !cur.lyric) cur.lyric = line.slice(0, 80);
   }
+  flush();
   const keep = secs.filter(x => x.chords.length);
   if (!keep.length) throw new Error('Não achei acordes nesse texto. Cole a cifra com os acordes em linhas próprias (como no Cifra Club).');
-  const all = keep.flatMap(x => x.chords);
+  const all = keep.flatMap(x => x.chords.map(o => [o.c, o.b]));
   const key = keyFromChords(all.map(c => c[0]), all.map(c => c[1]));
   const sections = keep.map(x => {
-    const merged = []; for (const [c, b] of x.chords){ if (merged.length && merged[merged.length - 1][0] === c) merged[merged.length - 1][1] += b; else merged.push([c, b]); }
+    const merged = []; for (const {c, b} of x.chords){ if (merged.length && merged[merged.length - 1][0] === c) merged[merged.length - 1][1] += b; else merged.push([c, b]); }
     return {name: x.name, prog: merged.map(([c, b]) => c + ':' + b).join(' '), reps: 1, emo: x.emo, int: x.int, solo: x.solo, lyric: x.lyric};
   });
   return {sections, key, nChords: all.length, warnings: [...new Set(warn)]};
@@ -1005,9 +1028,12 @@ function readSections(){
   return [...document.querySelectorAll('#secList .sec')].map(d => ({name: d.querySelector('.sn').value, prog: d.querySelector('.sp').value, emo: d.querySelector('.se').value,
     reps: parseInt(d.querySelector('.sr').value, 10), int: parseInt(d.querySelector('.si').value, 10), solo: d.querySelector('.ss').checked, lyric: d.dataset.lyric || ''}));
 }
+$('cifBpm').addEventListener('input', () => { $('bpm').value = $('cifBpm').value; later(); });
+$('bpm').addEventListener('input', () => { $('cifBpm').value = $('bpm').value; });
 $('cifraGo').onclick = () => {
   try {
-    const r = PGM.parseCifra($('cifraTxt').value, parseInt($('cifBeats').value, 10));
+    const bpm = Math.min(220, Math.max(40, num('cifBpm', 100))); $('bpm').value = bpm;
+    const r = PGM.parseCifra($('cifraTxt').value, parseInt($('cifBeats').value, 10), bpm);
     setSections(r.sections); $('useSec').checked = true; keySel.value = r.key; regenerate();
     $('cifraOut').textContent = r.sections.length + ' parte(s), ' + r.nChords + ' acordes, tom provável ' + r.key + (r.warnings.length ? ' · ' + r.warnings.join('; ') : '') + '. Confira o tom e o andamento, e as seções logo abaixo.';
     toast('Cifra lida: ' + r.sections.length + ' seções montadas.');
