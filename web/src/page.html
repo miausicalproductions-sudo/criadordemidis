@@ -57,6 +57,11 @@ button.mini{padding:2px 7px;font-size:12px}
 button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}
 button.primary:hover{filter:brightness(1.08);background:var(--accent)}
 .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.secs{display:grid;gap:10px;margin-top:10px}
+.sec{border:1px solid var(--line);border-radius:6px;padding:10px;display:grid;gap:8px;background:var(--bg)}
+.sec .top{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
+.sec .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;align-items:end}
+.sec .rm{padding:4px 9px;color:var(--muted)}
 .chip{font-family:var(--mono);font-size:12.5px;border:1px solid var(--line);border-radius:4px;padding:2px 7px;background:var(--bg)}
 .chip small{color:var(--muted);margin-left:5px;font-size:11px}
 .sl{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:0 8px;align-items:center}
@@ -120,6 +125,16 @@ input[type=range]{width:100%;accent-color:var(--accent)}
           <div><label for="key">Tom</label><select id="key"></select></div>
           <div><label for="bpm">Andamento (BPM)</label><input type="number" id="bpm" value="106.4" min="40" max="220" step="0.1"></div>
           <div><label for="repeats">Repetições</label><select id="repeats"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="h-sec">
+        <h2 id="h-sec">Seções da música</h2>
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="useSec"> Montar por seções (verso, pré-refrão, refrão). Cada uma tem seus acordes, emoção e intensidade.</label>
+        <div id="secBox" hidden>
+          <div class="secs" id="secList"></div>
+          <div class="row" style="margin-top:10px"><button type="button" id="secAdd">+ Adicionar seção</button></div>
+          <p class="hint">Emoções: <b>Sussurro</b> (poucas notas, bem suave), <b>Balada</b> (baixo arpejando, acordes longos), <b>Crescendo</b> (arpejos que sobem de intensidade ao longo da seção), <b>Clímax</b> (acordes a cada tempo, baixo em oitavas, melodia dobrada). A intensidade vai de 0 a 100. Aceita acordes como Cmaj9, Am9, G/B, Bm7b5, Dadd9, F6.</p>
         </div>
       </section>
 
@@ -222,8 +237,33 @@ function loadRefs(){ try { const r = JSON.parse(localStorage.getItem(LS_KEY) || 
 
 /* ---------- parâmetros ---------- */
 const num = (id, d) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : d; };
+const EMOS = [['sussurro', 'Sussurro'], ['balada', 'Balada'], ['crescendo', 'Crescendo'], ['climax', 'Clímax']];
+const SEC_DEFAULT = [
+  {name: 'Verso', prog: 'C#m7:4 A:4 E:4 B:4', reps: 1, emo: 'sussurro', int: 35, solo: false},
+  {name: 'Pré-refrão', prog: 'A:4 B:4 A:4 B:4', reps: 1, emo: 'crescendo', int: 50, solo: true},
+  {name: 'Refrão', prog: 'C#m7:4 A:4 E:4 B:4', reps: 2, emo: 'climax', int: 78, solo: true}];
+function addSection(o){
+  const d = document.createElement('div'); d.className = 'sec';
+  const uid = Math.random().toString(36).slice(2, 7);
+  d.innerHTML = '<div class="top"><div><label>Nome</label><input type="text" class="sn" spellcheck="false" autocomplete="off"></div><button type="button" class="rm" aria-label="Remover seção">Remover</button></div>' +
+    '<div><label>Acordes (batidas depois de :)</label><input type="text" class="sp" spellcheck="false" autocomplete="off"></div>' +
+    '<div class="two"><div><label>Emoção</label><select class="se"></select></div><div><label>Repetições</label><select class="sr"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>' +
+    '<div class="sl"><label>Intensidade</label><input type="range" class="si" min="0" max="100" step="1"><output class="sio"></output></div></div>' +
+    '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" class="ss"> Solo nesta seção</label>';
+  const e = d.querySelector('.se'); for (const [v, t] of EMOS){ const op = document.createElement('option'); op.value = v; op.textContent = t; e.appendChild(op); }
+  d.querySelector('.sn').value = o.name; d.querySelector('.sp').value = o.prog; e.value = o.emo; d.querySelector('.sr').value = String(o.reps);
+  d.querySelector('.si').value = o.int; d.querySelector('.ss').checked = !!o.solo; d.querySelector('.sio').textContent = o.int;
+  d.querySelector('.rm').onclick = () => { d.remove(); regenerate(); };
+  $('secList').appendChild(d);
+}
+function readSections(){
+  return [...document.querySelectorAll('#secList .sec')].map(d => ({name: d.querySelector('.sn').value, prog: d.querySelector('.sp').value, emo: d.querySelector('.se').value,
+    reps: parseInt(d.querySelector('.sr').value, 10), int: parseInt(d.querySelector('.si').value, 10), solo: d.querySelector('.ss').checked}));
+}
+function setSections(list){ $('secList').textContent = ''; list.forEach(addSection); }
 function params(){
-  return {prog: $('prog').value, key: keySel.value, bpm: Math.min(220, Math.max(40, num('bpm', 106.4))), repeats: parseInt($('repeats').value, 10),
+  const useSec = $('useSec').checked, sections = useSec ? readSections() : null;
+  return {prog: $('prog').value, sections, key: keySel.value, bpm: Math.min(220, Math.max(40, num('bpm', 106.4))), repeats: parseInt($('repeats').value, 10),
     seed: Math.max(1, Math.floor(num('seed', 1))), texture: $('texture').value, intensity: num('intensity', 1), rhythm: $('rhythm').value, solo: $('solo').checked,
     soloStartBar: Math.max(0, Math.floor(num('soloStart', 3)) - 1), lhDensity: num('lhD', .28), rhDensity: num('rhD', .22),
     human: num('human', 1), timingSd: num('tsd', 6), strumMs: num('strum', 36), strumProb: num('strumP', 80) / 100, strumDir: $('strumDir').value, lead: num('lead', 12), rubato: num('rubato', 10), contrast: num('contrast', 1), pedal: $('pedal').checked};
@@ -238,15 +278,17 @@ function regenerate(){
   stopPlay();
   syncOutputs();
   const p = params();
-  const drv = p.texture === 'driving';
+  const drv = p.texture === 'driving' && !p.sections;
   for (const id of ['rhythm', 'lhD', 'rhD']) $(id).disabled = !drv;
+  $('texture').disabled = !!p.sections; $('prog').disabled = !!p.sections; $('repeats').disabled = !!p.sections;
+  $('secBox').hidden = !p.sections; document.querySelectorAll('#secList .sio').forEach(o => o.textContent = o.parentNode.querySelector('.si').value);
   try {
     const prof = PGM.aggregateProfile(S.refs);
     const g = PGM.generate({...p, profile: p.rhythm === 'learned' ? prof : null});
-    const mk = amt => PGM.humanize(g.notes, g.segs, p.bpm, g.total, p.seed, {amount: amt, timingSd: p.timingSd, timingMax: 22, velJitter: 6, vShift: (p.intensity - 1) * 20 + (p.texture === 'driving' ? 0 : -8), strumMs: p.strumMs, strumProb: p.strumProb, strumDir: p.strumDir, lead: p.lead, rubato: p.rubato, contrast: p.contrast, pedal: p.pedal});
+    const mk = amt => PGM.humanize(g.notes, g.segs, p.bpm, g.total, p.seed, {amount: amt, timingSd: p.timingSd, timingMax: 22, velJitter: 6, vShift: (p.intensity - 1) * 20 + (p.texture === 'driving' && !p.sections ? 0 : -8), strumMs: p.strumMs, strumProb: p.strumProb, strumDir: p.strumDir, lead: p.lead, rubato: p.rubato, contrast: p.contrast, pedal: p.pedal});
     S.result = {g, p, human: mk(p.human), grid: mk(0), prof};
     $('progErr').hidden = true;
-    renderChips(p);
+    renderChips(g);
     $('rhythmHint').textContent = !drv ? 'Textura de balada: o desenho vem de regras. O ritmo dos seus MIDIs de referência só entra no estilo de acordes batidos.' : p.rhythm === 'learned' && !prof
       ? 'Sem referências ainda: o ritmo usa os padrões de balada. Adicione MIDIs ao lado para o ritmo vir dos seus exemplos.'
       : p.rhythm === 'learned' ? 'Ritmo sorteado a partir de ' + S.refs.length + ' referência(s).' : 'Ritmo vem dos padrões de balada.';
@@ -257,9 +299,12 @@ function regenerate(){
   }
   draw();
 }
-function renderChips(p){
+function renderChips(g){
   const box = $('chips'); box.textContent = '';
-  for (const s of PGM.parseProgression(p.prog)){
+  const one = g.segs.slice(0, 80);
+  let last = null;
+  for (const s of one){
+    if (s.secName && s.secName !== last){ last = s.secName; const t = document.createElement('span'); t.className = 'hint'; t.style.cssText = 'width:100%;margin:6px 0 0'; t.textContent = s.secName + ' · ' + s.emo; box.appendChild(t); }
     const c = document.createElement('span'); c.className = 'chip'; c.textContent = s.name;
     const sm = document.createElement('small'); sm.textContent = (s.length / 4) + ' bat'; c.appendChild(sm); box.appendChild(c);
   }
@@ -391,7 +436,7 @@ function recipe(){
 }
 function loadRecipe(o){
   if (!o || o.app !== 'gerador-piano-midi') throw new Error('Esse JSON não é uma receita deste gerador.');
-  $('prog').value = o.prog; keySel.value = o.key; $('bpm').value = o.bpm; $('repeats').value = String(o.repeats); $('seed').value = o.seed;
+  $('prog').value = o.prog; $('useSec').checked = !!(o.sections && o.sections.length); if (o.sections && o.sections.length) setSections(o.sections); keySel.value = o.key; $('bpm').value = o.bpm; $('repeats').value = String(o.repeats); $('seed').value = o.seed;
   $('rhythm').value = o.rhythm; $('solo').checked = !!o.solo; $('soloStart').value = (o.soloStartBar || 0) + 1;
   $('lhD').value = o.lhDensity; $('rhD').value = o.rhDensity; $('human').value = o.human; $('tsd').value = o.timingSd; $('pedal').checked = !!o.pedal;
   $('strum').value = o.strumMs ?? 36; $('strumP').value = Math.round((o.strumProb ?? 0.8) * 100); $('strumDir').value = o.strumDir || 'mix';
@@ -423,6 +468,9 @@ function buildFiles(){
 /* ---------- eventos ---------- */
 let deb = 0; const later = () => { clearTimeout(deb); deb = setTimeout(regenerate, 220); };
 $('prog').addEventListener('input', later);
+$('useSec').addEventListener('change', () => { if ($('useSec').checked && !$('secList').children.length) setSections(SEC_DEFAULT); regenerate(); });
+$('secAdd').onclick = () => { addSection({name: 'Seção ' + ($('secList').children.length + 1), prog: 'C#m7:4 A:4 E:4 B:4', reps: 1, emo: 'balada', int: 55, solo: true}); regenerate(); };
+$('secList').addEventListener('input', later); $('secList').addEventListener('change', later);
 for (const id of ['key', 'bpm', 'repeats', 'seed', 'texture', 'rhythm', 'solo', 'soloStart', 'pedal', 'strumDir']) $(id).addEventListener('input', later);
 for (const id of ['lhD', 'rhD', 'human', 'tsd', 'strum', 'strumP', 'lead', 'rubato', 'contrast', 'intensity']) $(id).addEventListener('input', () => { syncOutputs(); later(); });
 $('gen').onclick = () => { $('seed').value = 1 + Math.floor(Math.random() * 99999); regenerate(); };
