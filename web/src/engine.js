@@ -245,6 +245,52 @@ function genComping(segs, total, rng, prof, rhythm, dens){
   }
   return notes;
 }
+/* ---------- Texturas de balada ----------
+   ballad:       mão esquerda arpejando em colcheias, mão direita com acordes longos (1 e 3)
+   ballad-still: baixo parado (raiz + oitava no 1, quinta no 3) e acordes longos
+   arpeggio:     baixo parado e mão direita arpejando em colcheias
+   Notas longas + pedal, poucos ataques: é o que dá a suavidade. */
+function lhLadder(seg){ const r = nearest(seg.root, 40, 36, 47), t = r + 12 + (seg.q.startsWith('m') ? 3 : 4); return [r, r + 7, r + 12, t, r + 19]; }
+function genBallad(segs, total, rng, texture){
+  const nbars = Math.ceil(total / 16), notes = []; let grp = 0, prevV = null; const segV = new Map();
+  const voice = seg => { if (!segV.has(seg.start)){ const v = voiceRh(seg, prevV, 60, 79); segV.set(seg.start, v); prevV = v; } return segV.get(seg.start); };
+  const lhArp = texture === 'ballad', rhArp = texture === 'arpeggio';
+  let rhPat = [0, 8];
+  for (let b = 0; b < nbars; b++){
+    const base = b * 16;
+    if (lhArp){
+      const idx = [0, 1, 2, 3, 2, 1, 2, 3], drop = rng() < 0.35 ? 1 + Math.floor(rng() * 7) : -1;
+      for (let k = 0; k < 8; k++){
+        const g = base + k * 2; if (g >= total || k === drop) continue;
+        const seg = segAt(segs, g), end = Math.min(seg.start + seg.length, g + (k === 7 ? 2 : 3));
+        grp++; notes.push({start: g, dur: Math.max(1, end - g), pitch: lhLadder(seg)[idx[k]], track: 'lh', group: grp, role: k === 0 ? 'bass' : 'inner', lg: [1.0, 1.15]});
+      }
+    } else {
+      for (const [h, which] of [[0, 'root'], [8, 'fifth']]){
+        const g = base + h; if (g >= total) continue; const seg = segAt(segs, g), l = lhLadder(seg);
+        const end = Math.min(seg.start + seg.length, h === 0 ? base + 8 : base + 16);
+        const ps = which === 'root' ? [l[0], l[2]] : [l[0], l[1]];
+        grp++; ps.forEach((pitch, i) => notes.push({start: g, dur: Math.max(1, end - g), pitch, track: 'lh', group: grp, role: i === 0 ? 'bass' : 'inner', lg: [0.98, 1.05]}));
+      }
+    }
+    if (rhArp){
+      const idx = [0, 1, 2, 3, 2, 1, 2, 1], drop = rng() < 0.3 ? 1 + Math.floor(rng() * 7) : -1;
+      for (let k = 0; k < 8; k++){
+        const g = base + k * 2; if (g >= total || k === drop) continue;
+        const seg = segAt(segs, g), v = voice(seg), lad = v.concat([v[0] + 12]), end = Math.min(seg.start + seg.length, g + 4);
+        grp++; notes.push({start: g, dur: Math.max(1, end - g), pitch: lad[idx[k] % lad.length], track: 'rh', group: grp, role: 'inner', lg: [0.95, 1.1]});
+      }
+    } else {
+      if (b % 2 === 0) rhPat = rng.choice([[0, 8], [0, 8], [0, 10], [0, 6, 10]]); else if (rng() < 0.4) rhPat = rng.choice([[0, 8], [0, 10], [0, 12]]);
+      rhPat.forEach((h, k) => {
+        const g = base + h; if (g >= total) return; const seg = segAt(segs, g), v = voice(seg);
+        let end = k + 1 < rhPat.length ? base + rhPat[k + 1] : base + 16; end = Math.min(end, seg.start + seg.length);
+        grp++; v.forEach((pitch, i) => notes.push({start: g, dur: Math.max(1, end - g), pitch, track: 'rh', group: grp, role: i === v.length - 1 ? 'top' : 'inner', lg: [0.96, 1.03]}));
+      });
+    }
+  }
+  return notes;
+}
 const CELLS = [
   [[0,4],[4,2],[6,2],[8,4],[12,4]], [[0,2],[2,2],[4,4],[8,2],[10,2],[12,4]], [[2,2],[4,2],[6,4],[10,2],[12,2],[14,2]],
   [[0,6],[6,2],[8,8]], [[0,3],[3,3],[6,2],[8,4],[12,2],[14,2]], [[0,2],[2,2],[4,2],[6,2],[8,2],[10,2],[12,4]]];
@@ -271,6 +317,7 @@ function genSolo(segs, total, key, rng, startBar, lo = 67, hi = 86, restProb = 0
         const closest = (arr, x) => arr.reduce((bb, y) => Math.abs(y - x) < Math.abs(bb - x) ? y : bb);
         if (strong && !ct.has(p % 12)) p = closest(scale.filter(x => ct.has(x % 12)), p);
         if (last){ const third = (seg.root + (seg.q.startsWith('m') ? 3 : 4)) % 12; p = closest(scale.filter(x => x % 12 === seg.root || x % 12 === third), p); }
+        if (p === cur && rng() < 0.75){ const j = Math.max(0, Math.min(scale.length - 1, scale.indexOf(p) + rng.choice([-1, 1]))); p = scale[j]; }
         cur = p; grp++;
         notes.push({start: g, dur: d + (last && d < 4 ? 2 : 0), pitch: p, track: 'solo', group: grp, role: 'melody'});
       }
@@ -284,7 +331,8 @@ function generate(o){
   if (o.repeats > 1){ const L = segs.reduce((s, x) => s + x.length, 0), base = segs; segs = [];
     for (let k = 0; k < o.repeats; k++) for (const s of base) segs.push({...s, start: s.start + k * L}); }
   const last = segs[segs.length - 1], total = last.start + last.length, key = parseKey(o.key);
-  let notes = genComping(segs, total, rng, o.profile, o.rhythm, {lh: o.lhDensity, rh: o.rhDensity});
+  const tex = o.texture || 'driving';
+  let notes = tex === 'driving' ? genComping(segs, total, rng, o.profile, o.rhythm, {lh: o.lhDensity, rh: o.rhDensity}) : genBallad(segs, total, rng, tex);
   if (o.solo) notes = notes.concat(genSolo(segs, total, key, rng, o.soloStartBar));
   return {notes, segs, total};
 }
@@ -300,13 +348,13 @@ function generate(o){
    - pedal com meio-pedal (profundidade variável) */
 const msToTicks = (ms, bpm) => ms * bpm * PPQ / 60000;
 const accent = s => s === 0 ? 9 : s === 8 ? 5 : s % 4 === 0 ? 2 : s % 2 === 0 ? -1 : -4;
-const HUMAN_DEFAULTS = {strumMs: 45, strumProb: 0.55, strumDir: 'mix', lead: 14, rubato: 10, contrast: 1, timingSd: 6, timingMax: 22, velJitter: 4, pedal: true};
+const HUMAN_DEFAULTS = {vShift: 0, strumMs: 45, strumProb: 0.55, strumDir: 'mix', lead: 14, rubato: 10, contrast: 1, timingSd: 6, timingMax: 22, velJitter: 4, pedal: true};
 function humanize(notes, segs, bpm, total, seed, cfg){
   const c = {...HUMAN_DEFAULTS}; for (const k in cfg) if (cfg[k] !== undefined) c[k] = cfg[k];
   const A = c.amount, rng = makeRng(seed * 7919 + 13), events = [], groups = new Map();
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
-  const flat = {lh: 54, rh: 62, solo: 84};
-  const base = {lh: 50, rh: 56, solo: 56 + 22 * c.contrast};
+  const flat = {lh: 54 + c.vShift, rh: 62 + c.vShift, solo: 84 + c.vShift};
+  const base = {lh: 50 + c.vShift, rh: 56 + c.vShift, solo: 56 + 22 * c.contrast + c.vShift};
   const segStarts = new Set(segs.map(s => s.start));
   const ph1 = rng() * 2 * Math.PI, ph2 = rng() * 2 * Math.PI;
   const drift = t => c.rubato * A * (0.6 * Math.sin(2 * Math.PI * t / (4.7 * 4) + ph1) + 0.4 * Math.sin(2 * Math.PI * t / (11.3 * 4) + ph2));
@@ -339,7 +387,7 @@ function humanize(notes, segs, bpm, total, seed, cfg){
       if (A === 0) v = flat[trk];
       v = Math.round(clamp(v, 18, 122));
       // duração por linha
-      const lgr = trk === 'solo' ? [0.98, 1.12] : trk === 'rh' ? [0.78, 0.96] : [0.95, 1.04];
+      const lgr = n.lg || (trk === 'solo' ? [0.98, 1.12] : trk === 'rh' ? [0.78, 0.96] : [0.95, 1.04]);
       const lg = A === 0 ? 1 : 1 + (rng.uniform(lgr[0], lgr[1]) - 1) * A;
       let offT = (n.start + n.dur * lg) * TPS + msToTicks(rng.gauss(0, c.timingSd * 0.6) * A, bpm);
       offT = Math.max(offT, on + msToTicks(45, bpm));
