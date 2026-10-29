@@ -149,7 +149,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
             <select id="strumDir"><option value="up">Do grave ao agudo</option><option value="down">Do agudo ao grave</option><option value="mix" selected>Variada (mais do agudo ao grave)</option></select></div>
           <div class="sl"><label for="lead">Melodia à frente do acompanhamento (ms)</label><input type="range" id="lead" min="0" max="40" step="1" value="14"><output id="leadO"></output></div>
           <div class="sl"><label for="rubato">Respiração do andamento (ms)</label><input type="range" id="rubato" min="0" max="30" step="1" value="10"><output id="rubatoO"></output></div>
-          <div class="sl"><label for="contrast">Contraste melodia / acompanhamento</label><input type="range" id="contrast" min="0" max="2" step="0.05" value="1"><output id="contrastO"></output></div>
+          <div class="sl"><label for="contrast">Destaque da melodia sobre o acompanhamento</label><input type="range" id="contrast" min="0" max="2" step="0.05" value="1"><output id="contrastO"></output></div>
           <div class="sl"><label for="tsd">Soltura do timing (ms)</label><input type="range" id="tsd" min="0" max="15" step="0.5" value="6"><output id="tsdO"></output></div>
           <label class="chk"><input type="checkbox" id="pedal" checked> Pedal de sustain (CC64)</label>
         </div>
@@ -558,7 +558,7 @@ function humanize(notes, segs, bpm, total, seed, cfg){
   const A = c.amount, rng = makeRng(seed * 7919 + 13), events = [], groups = new Map();
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
   const flat = {lh: 54 + c.vShift, rh: 62 + c.vShift, solo: 84 + c.vShift};
-  const base = {lh: 50 + c.vShift, rh: 56 + c.vShift, solo: 56 + 22 * c.contrast + c.vShift};
+  const base = {lh: 50 + c.vShift, rh: 56 + c.vShift, solo: 56 + 12 * c.contrast + c.vShift};
   const segStarts = new Set(segs.map(s => s.start));
   const ph1 = rng() * 2 * Math.PI, ph2 = rng() * 2 * Math.PI;
   const drift = t => c.rubato * A * (0.6 * Math.sin(2 * Math.PI * t / (4.7 * 4) + ph1) + 0.4 * Math.sin(2 * Math.PI * t / (11.3 * 4) + ph2));
@@ -585,7 +585,7 @@ function humanize(notes, segs, bpm, total, seed, cfg){
       // velocity
       const st = Math.floor(n.start), sb = st % 16;
       let add = accent(sb) + 6 * Math.sin(2 * Math.PI * n.start / 64) + (segStarts.has(st) ? 5 : 0) + 3 * rank[i] * (span > 8 ? 1 : 0);
-      if (trk === 'solo'){ const fr = (n.start % 32) / 32; add += 9 * (2 * Math.sin(Math.PI * (0.15 + 0.7 * fr)) - 1) + (n.pitch - 76) * 0.5 + Math.min(8, n.dur) * 0.6; }
+      if (trk === 'solo'){ const fr = (n.start % 32) / 32; add += 6 * (2 * Math.sin(Math.PI * (0.15 + 0.7 * fr)) - 1) + (n.pitch - 76) * 0.25 + Math.min(8, n.dur) * 0.3; }
       if (n.role === 'top') add += 7 * c.contrast; else if (n.role === 'inner' && trk === 'rh') add -= 5 * c.contrast; else if (n.role === 'bass') add += 4;
       let v = base[trk] + A * add + rng.gauss(0, c.velJitter * 0.8) * A;
       if (A === 0) v = flat[trk];

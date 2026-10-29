@@ -354,7 +354,7 @@ function humanize(notes, segs, bpm, total, seed, cfg){
   const A = c.amount, rng = makeRng(seed * 7919 + 13), events = [], groups = new Map();
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
   const flat = {lh: 54 + c.vShift, rh: 62 + c.vShift, solo: 84 + c.vShift};
-  const base = {lh: 50 + c.vShift, rh: 56 + c.vShift, solo: 56 + 22 * c.contrast + c.vShift};
+  const base = {lh: 50 + c.vShift, rh: 56 + c.vShift, solo: 56 + 12 * c.contrast + c.vShift};
   const segStarts = new Set(segs.map(s => s.start));
   const ph1 = rng() * 2 * Math.PI, ph2 = rng() * 2 * Math.PI;
   const drift = t => c.rubato * A * (0.6 * Math.sin(2 * Math.PI * t / (4.7 * 4) + ph1) + 0.4 * Math.sin(2 * Math.PI * t / (11.3 * 4) + ph2));
@@ -381,7 +381,7 @@ function humanize(notes, segs, bpm, total, seed, cfg){
       // velocity
       const st = Math.floor(n.start), sb = st % 16;
       let add = accent(sb) + 6 * Math.sin(2 * Math.PI * n.start / 64) + (segStarts.has(st) ? 5 : 0) + 3 * rank[i] * (span > 8 ? 1 : 0);
-      if (trk === 'solo'){ const fr = (n.start % 32) / 32; add += 9 * (2 * Math.sin(Math.PI * (0.15 + 0.7 * fr)) - 1) + (n.pitch - 76) * 0.5 + Math.min(8, n.dur) * 0.6; }
+      if (trk === 'solo'){ const fr = (n.start % 32) / 32; add += 6 * (2 * Math.sin(Math.PI * (0.15 + 0.7 * fr)) - 1) + (n.pitch - 76) * 0.25 + Math.min(8, n.dur) * 0.3; }
       if (n.role === 'top') add += 7 * c.contrast; else if (n.role === 'inner' && trk === 'rh') add -= 5 * c.contrast; else if (n.role === 'bass') add += 4;
       let v = base[trk] + A * add + rng.gauss(0, c.velJitter * 0.8) * A;
       if (A === 0) v = flat[trk];
