@@ -376,7 +376,7 @@ function buildSections(sections){
     for (let k = 0; k < reps; k++) base.forEach((s, i) => {
       const length = s.length + (i === base.length - 1 ? L - L0 : 0), start = pos + k * L + s.start;
       const frac = (start - pos + length / 2) / total;
-      segs.push({...s, start, length, sec: si, secName: sec.name || ('Seção ' + (si + 1)), emo: sec.emo || 'balada', solo: sec.solo !== false,
+      segs.push({...s, start, length, sec: si, stop: sec.stop || 'nenhuma', secName: sec.name || ('Seção ' + (si + 1)), emo: sec.emo || 'balada', solo: sec.solo !== false,
         vint: Math.max(0, Math.min(100, (sec.int ?? 50) + ramp * (frac - 0.5)))});
     });
     pos += total;
@@ -581,6 +581,99 @@ function parseCifra(text, beatsPerChord = 4, bpm = 100){
   });
   return {sections, key, nChords: all.length, warnings: [...new Set(warn)]};
 }
+
+/* ---------- Bateria (GM) + baixo, estilo sertanejo; paradinhas ----------
+   Bateria nas notas General MIDI: 36 bumbo, 37 aro, 38 caixa, 39 palma, 42 chimbal, 46 chimbal aberto, 49 prato, 45/47/50 tons, 70 shaker.
+   Os padrões são regras minhas (não aprendidos): servem de esboço para você ajustar de ouvido. */
+const DR = {kick: 36, rim: 37, snare: 38, clap: 39, hat: 42, ohat: 46, crash: 49, tomH: 50, tomM: 47, tomL: 45, shaker: 70};
+function sectionSpans(segs){
+  const sp = new Map();
+  for (const s of segs){ const k = s.sec ?? 0, e = sp.get(k) || {a: 1e9, b: 0}; e.a = Math.min(e.a, s.start); e.b = Math.max(e.b, s.start + s.length); sp.set(k, e); }
+  return sp;
+}
+function breakBars(segs, total){
+  const out = new Set(), sp = sectionSpans(segs);
+  for (let b = 0; b < Math.ceil(total / 16); b++){
+    const base = b * 16, sg = segAt(segs, base), span = sp.get(sg.sec ?? 0); if (!sg.stop || sg.stop === 'nenhuma') continue;
+    const barIn = Math.round((base - span.a) / 16);
+    if ((sg.stop === 'fim' && base + 16 >= span.b) || (sg.stop === 'frase' && barIn % 4 === 3 && base + 16 < span.b + 1)) out.add(b);
+  }
+  return out;
+}
+function applyBreaks(notes, brk){
+  if (!brk.size) return notes;
+  const out = [];
+  for (const n of notes){
+    if (n.track === 'drums'){ out.push(n); continue; }
+    const b = Math.floor(n.start / 16), cut = b * 16 + 12;
+    if (brk.has(b) && n.start >= cut) continue;
+    if (brk.has(b) && n.start < cut && n.start + n.dur > cut) out.push({...n, dur: Math.max(0.5, cut - n.start)});
+    else if (brk.has(b - 1) === false && brk.has(Math.floor((n.start + n.dur - 0.01) / 16)) && n.start < Math.floor((n.start + n.dur - 0.01) / 16) * 16 + 12 && Math.floor(n.start / 16) !== Math.floor((n.start + n.dur - 0.01) / 16))
+      out.push({...n, dur: Math.max(0.5, Math.floor((n.start + n.dur - 0.01) / 16) * 16 + 12 - n.start)});
+    else out.push(n);
+  }
+  return out;
+}
+function genRhythm(segs, total, rng, o){
+  const style = o.style || 'balada', notes = [], nbars = Math.ceil(total / 16), brk = breakBars(segs, total), sp = sectionSpans(segs); let g = 0;
+  const A = (arr) => arr[Math.floor(rng() * arr.length)];
+  const hit = (list, step, pitch, v, dur = 1) => list.push({step, pitch, v, dur});
+  for (let b = 0; b < nbars; b++){
+    const base = b * 16, sg = segAt(segs, base), emo = sg.emo || 'balada', vint = sg.vint ?? 50, span = sp.get(sg.sec ?? 0) || {a: 0, b: total};
+    const barIn = Math.round((base - span.a) / 16), secStart = barIn === 0, isBrk = brk.has(b), afterBrk = brk.has(b - 1);
+    const H = [], K = [];
+    const uni = style === 'universitario';
+    // bumbo
+    if (emo === 'sussurro'){ if (b % 2 === 0) K.push(0); }
+    else if (emo === 'balada') { K.push(0); const x = A(uni ? [[], [6], [10], [10, 14]] : [[], [], [10]]); K.push(...x); }
+    else { K.push(0, 8); const x = A(uni ? [[], [6], [10], [6, 10], [14]] : [[], [10], [6]]); K.push(...x); }
+    for (const k of K) hit(H, k, DR.kick, k === 0 ? 104 : 92);
+    // caixa / aro / palma
+    if (emo === 'sussurro'){ hit(H, 12, DR.rim, 58); }
+    else if (emo === 'balada'){ hit(H, 4, DR.rim, 66); hit(H, 12, DR.snare, 84); }
+    else { hit(H, 4, DR.snare, 96); hit(H, 12, DR.snare, 100); if (emo === 'climax') hit(H, 12, DR.clap, 70); }
+    // chimbal / shaker
+    const dense16 = emo === 'climax' ? uni : emo === 'crescendo' && vint > 58;
+    if (emo === 'sussurro'){ for (const k of [0, 4, 8, 12]) hit(H, k, DR.hat, 34); }
+    else for (let k = 0; k < 16; k += dense16 ? 1 : 2){ if (dense16 && k % 2 === 1) hit(H, k, DR.hat, 42); else hit(H, k, DR.hat, k % 4 === 0 ? 74 : 56); }
+    if (emo === 'climax' && rng() < 0.7) hit(H, 14, DR.ohat, 78, 2);
+    if (uni && emo !== 'sussurro') for (let k = 1; k < 16; k += 2) hit(H, k, DR.shaker, 36);
+    // virada: fim de frase (compasso 4) ou paradinha
+    const wantFill = isBrk || (emo !== 'sussurro' && b % 4 === 3 && rng() < (emo === 'climax' ? 0.9 : 0.65));
+    let hits = H;
+    if (wantFill){
+      hits = H.filter(h => h.step < 12);
+      const F = A([[[12, DR.snare, 70], [13, DR.snare, 76], [14, DR.snare, 86], [15, DR.snare, 98]],
+        [[12, DR.tomH, 84], [13, DR.tomM, 88], [14, DR.tomL, 94], [15, DR.snare, 100]],
+        [[12, DR.snare, 80], [14, DR.snare, 92], [15, DR.tomL, 100]]]);
+      for (const [st, pt, v] of F) hit(hits, st, pt, v);
+    }
+    if ((secStart && emo !== 'sussurro') || afterBrk || (emo === 'climax' && b % 4 === 0)) hit(hits, 0, DR.crash, secStart || afterBrk ? 104 : 88, 8);
+    if (o.drums !== false) for (const h of hits) notes.push({start: base + h.step, dur: h.dur, pitch: h.pitch, vel: h.v, v: h.v, track: 'drums', group: ++g, role: 'drum'});
+    // baixo: segue o bumbo (e as trocas de acorde), sustentado nas partes calmas
+    if (o.bass !== false){
+      const steps = new Set(emo === 'sussurro' ? [0] : K);
+      for (const sgn of segs) if (sgn.start > base && sgn.start < base + 16) steps.add(sgn.start - base);
+      steps.add(0);
+      let list = [...steps].sort((x, y) => x - y).filter(x => !(isBrk && x >= 12));
+      const next = segAt(segs, base + 16), nextRoot = nearest(next.bass ?? next.root, 36, 28, 40);
+      const approach = !isBrk && b + 1 < nbars && next.root !== sg.root && emo !== 'sussurro' && rng() < 0.55;
+      list.forEach((st, i) => {
+        const seg = segAt(segs, base + st), pcRoot = seg.bass ?? seg.root, r = nearest(pcRoot, 36, 28, 40);
+        let pitch = r; if (emo !== 'sussurro' && st === 8 && seg.root === sg.root && rng() < 0.35) pitch = r + 7 > 43 ? r - 5 : r + 7;
+        const nextSt = i + 1 < list.length ? list[i + 1] : (isBrk ? 12 : 16), segEnd = seg.start + seg.length - base;
+        let end = Math.min(nextSt, segEnd, isBrk ? 12 : 16); if (approach && i === list.length - 1) end = Math.min(end, 14);
+        const dur = Math.max(1, end - st), v = st === 0 ? 86 : 78;
+        notes.push({start: base + st, dur, pitch, vel: v, v, track: 'bass', group: ++g, role: 'bass'});
+      });
+      if (approach){
+        const ap = nextRoot + A([-1, -2, 1]), v = 80;
+        notes.push({start: base + 14, dur: 2, pitch: ap, vel: v, v, track: 'bass', group: ++g, role: 'bass'});
+      }
+    }
+  }
+  return notes;
+}
 function generate(o){
   const rng = makeRng(o.seed); let segs;
   if (o.sections && o.sections.length) segs = buildSections(o.sections);
@@ -592,6 +685,8 @@ function generate(o){
   let notes = tex === 'driving' && !(o.sections && o.sections.length) ? genComping(segs, total, rng, o.profile, o.rhythm, {lh: o.lhDensity, rh: o.rhDensity}) : genBallad(segs, total, rng, tex, vocalCtx(o.vocal));
   const V = vocalCtx(o.vocal);
   if (o.solo){ let sol = genSolo(segs, total, key, rng, o.soloStartBar); if (V) sol = fitFills(sol, V); notes = notes.concat(sol.filter(n => segAt(segs, n.start).solo !== false)); }
+  if (o.bass || o.drums) notes = notes.concat(genRhythm(segs, total, makeRng(o.seed * 31 + 7), {style: o.drumStyle, bass: !!o.bass, drums: !!o.drums}));
+  notes = applyBreaks(notes, breakBars(segs, total));
   return {notes, segs, total};
 }
 
@@ -618,7 +713,9 @@ function humanize(notes, segs, bpm, total, seed, cfg){
   const drift = t => c.rubato * A * (0.6 * Math.sin(2 * Math.PI * t / (4.7 * 4) + ph1) + 0.4 * Math.sin(2 * Math.PI * t / (11.3 * 4) + ph2));
   const ritard = t => { const bar = Math.floor(t / 16), s = t % 16; return (bar % 4 === 3 && s >= 12) ? c.rubato * A * 0.9 * (s - 11) / 4 : 0; };
   const beatNoise = Array.from({length: Math.ceil(total / 4) + 2}, () => rng.gauss(0, 0.6 * c.timingSd) * A);
-  for (const n of notes){ const k = n.track + ':' + n.group; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(n); }
+  const rhy = notes.filter(n => n.track === 'bass' || n.track === 'drums');
+  for (const n of notes){ if (n.track === 'bass' || n.track === 'drums') continue; const k = n.track + ':' + n.group; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(n); }
+  const gBeat0 = t => beatNoise[Math.floor(t / 4)] || 0;
   for (const [, ns] of groups){
     const trk = ns[0].track; ns.sort((a, b) => a.pitch - b.pitch);
     const nn = ns.length;
@@ -651,6 +748,18 @@ function humanize(notes, segs, bpm, total, seed, cfg){
       offT = Math.max(offT, on + msToTicks(45, bpm));
       events.push({on: Math.round(Math.max(0, on)), off: Math.round(offT), pitch: n.pitch, vel: v, track: trk});
     });
+  }
+  // baixo e bateria: acompanham o mesmo rubato do piano; bumbo no tempo, caixa um pouco atrás, chimbal solto
+  for (const n of rhy){
+    const vint = segAt(segs, Math.floor(n.start)).vint ?? 50, isD = n.track === 'drums';
+    if (A === 0){ events.push({on: Math.round(n.start * TPS), off: Math.round((n.start + n.dur) * TPS), pitch: n.pitch, vel: n.v, track: n.track}); continue; }
+    const late = !isD ? 4 : n.pitch === DR.kick ? 0 : (n.pitch === DR.snare || n.pitch === DR.rim || n.pitch === DR.clap) ? 6 : 1;
+    const sd = !isD ? 5 : n.pitch === DR.kick ? 3 : 4.5;
+    const onMs = drift(n.start) + ritard(n.start) + gBeat0(n.start) + late * A + rng.gauss(0, sd) * A;
+    const on = n.start * TPS + msToTicks(onMs, bpm);
+    const v = Math.round(clamp(n.v + (vint - 50) * 0.3 * A + rng.gauss(0, (isD ? 5 : 4) * A) + (isD && n.pitch === DR.hat && n.start % 4 === 0 ? 3 : 0), 20, 127));
+    const dur = isD ? n.dur * TPS * (n.pitch === DR.crash || n.pitch === DR.ohat ? 1 : 0.9) : n.dur * TPS * rng.uniform(0.9, 0.99);
+    events.push({on: Math.round(Math.max(0, on)), off: Math.round(Math.max(on + 20, on + dur)), pitch: n.pitch, vel: v, track: n.track});
   }
   // nunca deixa a mesma nota ligada por cima da repetição dela mesma
   const byKey = new Map();
@@ -690,12 +799,12 @@ function writeMidi(events, pedal, bpm, keyText, title){
   const cond = trackBytes([
     [0, 0, meta(0x03, str(title))], [0, 0, meta(0x51, [us >> 16 & 255, us >> 8 & 255, us & 255])],
     [0, 0, meta(0x58, [4, 2, 24, 8])], [0, 0, meta(0x59, [sf, mi])]]);
-  const tracks = [chunk('MTrk', cond)], names = {lh: 'Piano - mao esquerda', rh: 'Piano - mao direita', solo: 'Piano - solo'}, chan = {lh: 0, rh: 1, solo: 2};
-  for (const trk of ['lh', 'rh', 'solo']){
+  const tracks = [chunk('MTrk', cond)], names = {lh: 'Piano - mao esquerda', rh: 'Piano - mao direita', solo: 'Piano - solo', bass: 'Baixo', drums: 'Bateria'}, chan = {lh: 0, rh: 1, solo: 2, bass: 3, drums: 9};
+  for (const trk of ['lh', 'rh', 'solo', 'bass', 'drums']){
     const evs = events.filter(e => e.track === trk); if (!evs.length) continue; const ch = chan[trk];
     const msgs = [[0, 0, meta(0x03, str(names[trk]))]];
     for (const e of evs){ msgs.push([e.on, 2, [0x90 | ch, e.pitch, e.vel]], [e.off, 0, [0x80 | ch, e.pitch, 0]]); }
-    for (const [t, v] of pedal) msgs.push([t, 1, [0xB0 | ch, 64, v]]);
+    if (trk === 'lh' || trk === 'rh' || trk === 'solo') for (const [t, v] of pedal) msgs.push([t, 1, [0xB0 | ch, 64, v]]);
     tracks.push(chunk('MTrk', trackBytes(msgs)));
   }
   return new Uint8Array([...str('MThd'), ...be32(6), ...be16(1), ...be16(tracks.length), ...be16(PPQ), ...tracks.flat()]);

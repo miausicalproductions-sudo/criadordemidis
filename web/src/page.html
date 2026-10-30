@@ -8,17 +8,17 @@
 :root{
   --bg:#eef1f4; --panel:#ffffff; --ink:#17212b; --muted:#5a6b7a; --line:#d5dce3; --soft:#e6ebf0;
   --accent:#0d6b73; --accent-ink:#ffffff; --roll:#fbfcfd; --roll-grid:#e3e8ed; --roll-bar:#c3ccd5;
-  --lh:#2b6aa0; --rh:#4f8a2e; --solo:#c23a57; --warn:#a4330f; --warn-bg:#fbe9e3;
+  --lh:#2b6aa0; --rh:#4f8a2e; --solo:#c23a57; --bass:#8a5a14; --drum:#6b4fa0; --warn:#a4330f; --warn-bg:#fbe9e3;
   --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif; --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#0e151b; --panel:#162029; --ink:#e5ecf2; --muted:#93a4b3; --line:#2a3845; --soft:#1e2b36;
   --accent:#52c4cb; --accent-ink:#04252a; --roll:#101921; --roll-grid:#1b2833; --roll-bar:#34485a;
-  --lh:#5ea9df; --rh:#8fc562; --solo:#f27a93; --warn:#ffb59c; --warn-bg:#3a1f17; color-scheme:dark}}
+  --lh:#5ea9df; --rh:#8fc562; --solo:#f27a93; --bass:#e0a64a; --drum:#b79cf0; --warn:#ffb59c; --warn-bg:#3a1f17; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0e151b; --panel:#162029; --ink:#e5ecf2; --muted:#93a4b3; --line:#2a3845; --soft:#1e2b36;
   --accent:#52c4cb; --accent-ink:#04252a; --roll:#101921; --roll-grid:#1b2833; --roll-bar:#34485a;
-  --lh:#5ea9df; --rh:#8fc562; --solo:#f27a93; --warn:#ffb59c; --warn-bg:#3a1f17; color-scheme:dark}
+  --lh:#5ea9df; --rh:#8fc562; --solo:#f27a93; --bass:#e0a64a; --drum:#b79cf0; --warn:#ffb59c; --warn-bg:#3a1f17; color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);margin:0;
   padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
@@ -192,6 +192,9 @@ input[type=range]{width:100%;accent-color:var(--accent)}
           <div><label for="rhythm">Ritmo aprendido (só nos acordes batidos)</label>
             <select id="rhythm"><option value="learned">Aprendido dos meus MIDIs</option><option value="template">Padrões de balada</option></select></div>
           <div class="row" style="align-items:center">
+            <label class="chk"><input type="checkbox" id="bassOn" checked> Incluir baixo</label>
+            <label class="chk"><input type="checkbox" id="drumsOn" checked> Incluir bateria (notas General MIDI)</label>
+            <div><label for="drumStyle">Estilo da bateria</label><select id="drumStyle"><option value="balada" selected>Balada sertaneja (mais solta)</option><option value="universitario">Sertanejo universitário (mais sincopado, com shaker)</option></select></div>
             <label class="chk"><input type="checkbox" id="solo" checked> Incluir solo</label>
             <div><label for="soloStart">Começa no compasso</label><input type="number" id="soloStart" value="3" min="1" max="64"></div>
           </div>
@@ -230,6 +233,8 @@ input[type=range]{width:100%;accent-color:var(--accent)}
             <label><input type="checkbox" data-trk="lh" checked><i class="dot" style="background:var(--lh)"></i>Mão esquerda</label>
             <label><input type="checkbox" data-trk="rh" checked><i class="dot" style="background:var(--rh)"></i>Mão direita</label>
             <label><input type="checkbox" data-trk="solo" checked><i class="dot" style="background:var(--solo)"></i>Solo</label>
+            <label><input type="checkbox" data-trk="bass" checked><i class="dot" style="background:var(--bass)"></i>Baixo</label>
+            <label><input type="checkbox" data-trk="drums" checked><i class="dot" style="background:var(--drum)"></i>Bateria</label>
             <label id="vozLab" hidden><input type="checkbox" data-trk="voz" checked><i class="dot" style="background:var(--muted)"></i>Voz guia</label>
           </div>
           <span class="stat" id="stat"></span>
@@ -247,7 +252,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
             <input type="file" id="recFile" accept=".json,application/json"><span>Carregar receita</span></label>
         </div>
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
-        <p>O zip traz dois arquivos: o MIDI humanizado e o MIDI na grade exata. Cada um tem três faixas (mão esquerda, mão direita e solo). Extraia e arraste para o FL Studio ou para o Reaper, uma faixa por instrumento. A receita guarda tudo para refazer a mesma música.</p>
+        <p>O zip traz dois arquivos: o MIDI humanizado e o MIDI na grade exata. Cada um tem uma faixa por instrumento (mão esquerda, mão direita, solo, baixo e bateria; a bateria usa o canal 10 com notas General MIDI). Extraia e arraste para o FL Studio ou para o Reaper, uma faixa por instrumento. A receita guarda tudo para refazer a mesma música.</p>
       </section>
 
       <section class="card" aria-labelledby="h-prof">
@@ -265,7 +270,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 'use strict';
 (() => {
 const $ = id => document.getElementById(id);
-const S = {refs: [], errors: [], listen: 'human', mute: {lh: false, rh: false, solo: false, voz: false}, vocal: null, result: null, play: null};
+const S = {refs: [], errors: [], listen: 'human', mute: {lh: false, rh: false, solo: false, voz: false, bass: false, drums: false}, vocal: null, result: null, play: null};
 const LS_KEY = 'pgm.refs.v1';
 
 /* ---------- opções de tom ---------- */
@@ -282,7 +287,7 @@ const num = (id, d) => { const v = parseFloat($(id).value); return Number.isFini
 const EMOS = [['sussurro', 'Sussurro'], ['balada', 'Balada'], ['crescendo', 'Crescendo'], ['climax', 'Clímax']];
 const SEC_DEFAULT = [
   {name: 'Verso', prog: 'C#m7:4 A:4 E:4 B:4', reps: 1, emo: 'sussurro', int: 35, solo: false},
-  {name: 'Pré-refrão', prog: 'A:4 B:4 A:4 B:4', reps: 1, emo: 'crescendo', int: 50, solo: true},
+  {name: 'Pré-refrão', prog: 'A:4 B:4 A:4 B:4', reps: 1, emo: 'crescendo', int: 50, solo: true, stop: 'fim'},
   {name: 'Refrão', prog: 'C#m7:4 A:4 E:4 B:4', reps: 2, emo: 'climax', int: 78, solo: true}];
 function addSection(o){
   const d = document.createElement('div'); d.className = 'sec';
@@ -290,10 +295,11 @@ function addSection(o){
   d.innerHTML = '<p class="hint lyr" style="margin:0" hidden></p><div class="top"><div><label>Nome</label><input type="text" class="sn" spellcheck="false" autocomplete="off"></div><button type="button" class="rm" aria-label="Remover seção">Remover</button></div>' +
     '<div><label>Acordes (batidas depois de :)</label><input type="text" class="sp" spellcheck="false" autocomplete="off"></div>' +
     '<div class="two"><div><label>Emoção</label><select class="se"></select></div><div><label>Repetições</label><select class="sr"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>' +
-    '<div class="sl"><label>Intensidade</label><input type="range" class="si" min="0" max="100" step="1"><output class="sio"></output></div></div>' +
+    '<div class="sl"><label>Intensidade</label><input type="range" class="si" min="0" max="100" step="1"><output class="sio"></output></div>' +
+    '<div><label>Paradinha (todos param no último tempo)</label><select class="sst"><option value="nenhuma">Nenhuma</option><option value="fim">No fim da seção</option><option value="frase">No fim de cada 4 compassos</option></select></div></div>' +
     '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" class="ss"> Solo nesta seção</label>';
   const e = d.querySelector('.se'); for (const [v, t] of EMOS){ const op = document.createElement('option'); op.value = v; op.textContent = t; e.appendChild(op); }
-  d.querySelector('.sn').value = o.name; d.querySelector('.sp').value = o.prog; e.value = o.emo; d.querySelector('.sr').value = String(o.reps);
+  d.querySelector('.sn').value = o.name; d.querySelector('.sp').value = o.prog; e.value = o.emo; d.querySelector('.sr').value = String(o.reps); d.querySelector('.sst').value = o.stop || 'nenhuma';
   d.dataset.lyric = o.lyric || ''; const ly = d.querySelector('.lyr'); if (o.lyric){ ly.textContent = '“' + o.lyric + '…”'; ly.hidden = false; }
   d.querySelector('.si').value = o.int; d.querySelector('.ss').checked = !!o.solo; d.querySelector('.sio').textContent = o.int;
   d.querySelector('.rm').onclick = () => { d.remove(); regenerate(); };
@@ -301,7 +307,7 @@ function addSection(o){
 }
 function readSections(){
   return [...document.querySelectorAll('#secList .sec')].map(d => ({name: d.querySelector('.sn').value, prog: d.querySelector('.sp').value, emo: d.querySelector('.se').value,
-    reps: parseInt(d.querySelector('.sr').value, 10), int: parseInt(d.querySelector('.si').value, 10), solo: d.querySelector('.ss').checked, lyric: d.dataset.lyric || ''}));
+    reps: parseInt(d.querySelector('.sr').value, 10), int: parseInt(d.querySelector('.si').value, 10), solo: d.querySelector('.ss').checked, stop: d.querySelector('.sst').value, lyric: d.dataset.lyric || ''}));
 }
 $('cifBpm').addEventListener('input', () => { $('bpm').value = $('cifBpm').value; later(); });
 $('bpm').addEventListener('input', () => { $('cifBpm').value = $('bpm').value; });
@@ -347,7 +353,7 @@ function params(){
   const useSec = $('useSec').checked, sections = useSec ? readSections() : null;
   return {prog: $('prog').value, sections, vocal: S.vocal, key: keySel.value, bpm: Math.min(220, Math.max(40, num('bpm', 106.4))), repeats: parseInt($('repeats').value, 10),
     seed: Math.max(1, Math.floor(num('seed', 1))), texture: $('texture').value, intensity: num('intensity', 1), rhythm: $('rhythm').value, solo: $('solo').checked,
-    soloStartBar: Math.max(0, Math.floor(num('soloStart', 3)) - 1), lhDensity: num('lhD', .28), rhDensity: num('rhD', .22),
+    bass: $('bassOn').checked, drums: $('drumsOn').checked, drumStyle: $('drumStyle').value, soloStartBar: Math.max(0, Math.floor(num('soloStart', 3)) - 1), lhDensity: num('lhD', .28), rhDensity: num('rhD', .22),
     human: num('human', 1), timingSd: num('tsd', 6), strumMs: num('strum', 36), strumProb: num('strumP', 80) / 100, strumDir: $('strumDir').value, lead: num('lead', 12), rubato: num('rubato', 10), contrast: num('contrast', 1), pedal: $('pedal').checked};
 }
 function syncOutputs(){
@@ -411,7 +417,7 @@ function draw(posBeats){
   for (let b = 0; b <= beats; b++){ c.fillStyle = b % 4 === 0 ? css('--roll-bar') : css('--roll-grid'); c.fillRect(Math.round(b * ppb), TOP - (b % 4 === 0 ? 6 : 0), 1, H); }
   c.fillStyle = css('--ink'); c.font = '500 12px ' + css('--mono'); c.textBaseline = 'alphabetic';
   for (const s of R.g.segs) c.fillText(PGM.chordName(s.root, s.q), s.start / 4 * ppb + 4, 15);
-  const col = {lh: css('--lh'), rh: css('--rh'), solo: css('--solo'), voz: css('--muted')};
+  const col = {lh: css('--lh'), rh: css('--rh'), solo: css('--solo'), voz: css('--muted'), bass: css('--bass'), drums: css('--drum')};
   for (const e of ev){
     const w = Math.max(2, X(e.off - e.on) - 1), a = S.mute[e.track] ? 0.1 : 0.35 + 0.65 * e.vel / 127;
     c.globalAlpha = a; c.fillStyle = col[e.track]; c.fillRect(X(e.on), Y(e.pitch) + 0.5, w, Math.max(2, rowH - 1));
@@ -423,6 +429,24 @@ function draw(posBeats){
 
 /* ---------- prévia sonora (síntese simples; o som real vem do seu VST) ---------- */
 let actx = null;
+let noiseBuf = null;
+function noise(ctx){ if (!noiseBuf){ noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; } return noiseBuf; }
+function drumVoice(ctx, dest, t0, pitch, vel){
+  const a = Math.pow(vel / 127, 1.3), out = [], g = ctx.createGain(); g.connect(dest);
+  const tone = (f0, f1, len, amp, type = 'sine') => { const o = ctx.createOscillator(), og = ctx.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + len); og.gain.setValueAtTime(amp * a, t0); og.gain.exponentialRampToValueAtTime(0.001, t0 + len); o.connect(og); og.connect(g); o.start(t0); o.stop(t0 + len + 0.05); out.push(o); };
+  const burst = (hp, len, amp, bp) => { const n = ctx.createBufferSource(); n.buffer = noise(ctx); const f = ctx.createBiquadFilter(); f.type = bp ? 'bandpass' : 'highpass'; f.frequency.value = hp; const ng = ctx.createGain(); ng.gain.setValueAtTime(amp * a, t0); ng.gain.exponentialRampToValueAtTime(0.001, t0 + len); n.connect(f); f.connect(ng); ng.connect(g); n.start(t0); n.stop(t0 + len + 0.05); out.push(n); };
+  if (pitch === 36) tone(130, 45, 0.22, 0.9);
+  else if (pitch === 38) { burst(1800, 0.16, 0.45, true); tone(210, 150, 0.1, 0.3, 'triangle'); }
+  else if (pitch === 37) { burst(2400, 0.04, 0.4, true); tone(420, 380, 0.04, 0.25, 'triangle'); }
+  else if (pitch === 39) { burst(1500, 0.14, 0.4, true); }
+  else if (pitch === 42) burst(7000, 0.05, 0.28);
+  else if (pitch === 46) burst(7000, 0.28, 0.28);
+  else if (pitch === 49) burst(4500, 0.9, 0.3);
+  else if (pitch === 70) burst(6000, 0.04, 0.2);
+  else if (pitch === 45 || pitch === 47 || pitch === 50) tone(pitch === 50 ? 190 : pitch === 47 ? 150 : 110, pitch === 50 ? 120 : pitch === 47 ? 95 : 70, 0.25, 0.7);
+  else burst(3000, 0.08, 0.2);
+  g.gain.value = 0.55; return out;
+}
 function voice(ctx, dest, t0, t1, pitch, vel){
   const f = 440 * Math.pow(2, (pitch - 69) / 12), g = ctx.createGain(), g2 = ctx.createGain();
   const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(); o1.type = 'triangle'; o2.type = 'sine';
@@ -440,7 +464,7 @@ function startPlay(){
   const R = S.result, view = S.listen === 'human' ? R.human : R.grid, spt = 60 / R.p.bpm / PGM.PPQ;
   const master = actx.createGain(), comp = actx.createDynamicsCompressor(); master.gain.value = 0.9; master.connect(comp); comp.connect(actx.destination);
   const t0 = actx.currentTime + 0.12; let end = 0; const oscs = [];
-  for (const e of view.events){ if (S.mute[e.track]) continue; oscs.push(...voice(actx, master, t0 + e.on * spt, t0 + e.off * spt, e.pitch, e.vel)); end = Math.max(end, e.off); }
+  for (const e of view.events){ if (S.mute[e.track]) continue; oscs.push(...(e.track === 'drums' ? drumVoice(actx, master, t0 + e.on * spt, e.pitch, e.vel) : voice(actx, master, t0 + e.on * spt, t0 + e.off * spt, e.pitch, e.vel))); end = Math.max(end, e.off); }
   S.play = {t0, spt, end: end * spt + 1.2, master, oscs, raf: 0};
   $('playTxt').textContent = 'Parar'; $('playIcon').innerHTML = '<rect x="2" y="2" width="8" height="8" fill="currentColor"/>';
   const tick = () => {
@@ -522,13 +546,13 @@ function loadRecipe(o){
   const set = (id, v) => { if (v !== undefined && v !== null) $(id).value = String(v); };
   const hasSec = !!(o.sections && o.sections.length);
   if (!hasSec && !o.prog) throw new Error('A receita precisa ter "sections" ou "prog".');
-  set('prog', o.prog); $('useSec').checked = hasSec; if (hasSec) setSections(o.sections.map(x => ({name: x.name || 'Seção', prog: x.prog, reps: x.reps || 1, emo: x.emo || 'balada', int: x.int ?? 55, solo: x.solo !== false, lyric: x.lyric || ''})));
+  set('prog', o.prog); $('useSec').checked = hasSec; if (hasSec) setSections(o.sections.map(x => ({name: x.name || 'Seção', prog: x.prog, reps: x.reps || 1, emo: x.emo || 'balada', int: x.int ?? 55, solo: x.solo !== false, stop: x.stop || 'nenhuma', lyric: x.lyric || ''})));
   if (o.key){ const FL = {Db: 'C#', Eb: 'D#', Gb: 'F#', Ab: 'G#', Bb: 'A#'}, m = /^([A-G][#b]?)(m?)$/.exec(String(o.key).trim()); if (m) keySel.value = (FL[m[1]] || m[1]) + m[2]; }
   set('bpm', o.bpm); set('repeats', o.repeats); set('seed', o.seed); set('rhythm', o.rhythm);
   if (o.solo !== undefined) $('solo').checked = !!o.solo; if (o.soloStartBar !== undefined) $('soloStart').value = o.soloStartBar + 1;
   set('lhD', o.lhDensity); set('rhD', o.rhDensity); set('human', o.human); set('tsd', o.timingSd); if (o.pedal !== undefined) $('pedal').checked = !!o.pedal;
   set('strum', o.strumMs); if (o.strumProb !== undefined) $('strumP').value = Math.round(o.strumProb * 100); set('strumDir', o.strumDir);
-  set('texture', o.texture); set('intensity', o.intensity); set('lead', o.lead); set('rubato', o.rubato); set('contrast', o.contrast);
+  if (o.bass !== undefined) $('bassOn').checked = !!o.bass; if (o.drums !== undefined) $('drumsOn').checked = !!o.drums; set('drumStyle', o.drumStyle); set('texture', o.texture); set('intensity', o.intensity); set('lead', o.lead); set('rubato', o.rubato); set('contrast', o.contrast);
   if (o.profile && o.profile.low && !S.refs.length){
     S.refs.push({name: 'perfil da receita', fromRecipe: true, nNotes: null, bars: o.profile.bars, bpm: o.bpm, key: o.key, chords: [],
       low: o.profile.low.map(x => x * o.profile.bars), high: o.profile.high.map(x => x * o.profile.bars)}); saveRefs();
@@ -559,7 +583,7 @@ $('prog').addEventListener('input', later);
 $('useSec').addEventListener('change', () => { if ($('useSec').checked && !$('secList').children.length) setSections(SEC_DEFAULT); regenerate(); });
 $('secAdd').onclick = () => { addSection({name: 'Seção ' + ($('secList').children.length + 1), prog: 'C#m7:4 A:4 E:4 B:4', reps: 1, emo: 'balada', int: 55, solo: true}); regenerate(); };
 $('secList').addEventListener('input', later); $('secList').addEventListener('change', later);
-for (const id of ['key', 'bpm', 'repeats', 'seed', 'texture', 'rhythm', 'solo', 'soloStart', 'pedal', 'strumDir']) $(id).addEventListener('input', later);
+for (const id of ['key', 'bpm', 'repeats', 'seed', 'texture', 'bassOn', 'drumsOn', 'drumStyle', 'rhythm', 'solo', 'soloStart', 'pedal', 'strumDir']) $(id).addEventListener('input', later);
 for (const id of ['lhD', 'rhD', 'human', 'tsd', 'strum', 'strumP', 'lead', 'rubato', 'contrast', 'intensity']) $(id).addEventListener('input', () => { syncOutputs(); later(); });
 $('gen').onclick = () => { $('seed').value = 1 + Math.floor(Math.random() * 99999); regenerate(); };
 $('play').onclick = () => S.play ? stopPlay() : startPlay();
